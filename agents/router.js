@@ -1,6 +1,7 @@
 // Titan Core Router — classifies user intent and routes to specialist agents
 const fs = require('fs');
 const path = require('path');
+const brain = require('../lib/brain');
 
 const skills = {
   setup: {
@@ -92,7 +93,7 @@ function classify(message) {
   return best;
 }
 
-function process(message, mode, user) {
+async function process(message, mode, user) {
   // If mode is explicitly set, use that
   const modeMap = {
     'chat': null,
@@ -110,7 +111,7 @@ function process(message, mode, user) {
   const agent = skills[agentKey];
   
   // Generate response based on agent
-  const response = generateResponse(agentKey, message, user);
+  const response = await generateResponse(agentKey, message, user);
   
   return {
     agent: agent.name,
@@ -121,45 +122,102 @@ function process(message, mode, user) {
   };
 }
 
-function generateResponse(agentKey, message, user) {
+async function generateResponse(agentKey, message, user) {
   const lower = message.toLowerCase();
   
-  // Check for setup commands
+  // Check for setup commands (these don't need AI)
   if (agentKey === 'setup') {
     return handleSetup(message);
   }
   
+  // Use AI brain if available
+  if (brain.isReady()) {
+    return await generateAIResponse(agentKey, message, user);
+  }
+  
+  // Fallback to canned responses if no AI configured
+  return generateFallbackResponse(agentKey, message, user);
+}
+
+async function generateAIResponse(agentKey, message, user) {
+  try {
+    let response;
+    
+    switch (agentKey) {
+      case 'webBuilder':
+        response = await brain.generateCode(`Build a website for: ${message}\nUser: ${user.name}`);
+        return { text: `I'll build that website for you. Here's what I'm creating:\n\n${response}`, actions: ['View code', 'Preview', 'Deploy'] };
+      
+      case 'appBuilder':
+        response = await brain.generateCode(`Build an app for: ${message}\nPlatform: Cross-platform (iOS + Android)\nUser: ${user.name}`);
+        return { text: `Building your app. Here's the implementation:\n\n${response}`, actions: ['View code', 'Test', 'Deploy'] };
+      
+      case 'design':
+        response = await brain.generateDesign(`Design brief: ${message}\nFor Australian business\nUser: ${user.name}`);
+        return { text: `Here's your design concept:\n\n${response}`, actions: ['Generate images', 'Refine', 'Export'] };
+      
+      case 'copywriter':
+        response = await brain.generateCopy('website', `Write copy for: ${message}\nAudience: Australian\nUser: ${user.name}`);
+        return { text: `Here's your copy:\n\n${response}`, actions: ['Edit', 'SEO optimise', 'Publish'] };
+      
+      case 'data':
+        response = await brain.analyzeData(message, `Analyse this data for Australian business insights`);
+        return { text: `Here's my analysis:\n\n${response}`, actions: ['Visualise', 'Export', 'Drill deeper'] };
+      
+      case 'code':
+        response = await brain.generateCode(`Write code for: ${message}\nUser: ${user.name}`);
+        return { text: `Here's the code:\n\n${response}`, actions: ['Test', 'Document', 'Deploy'] };
+      
+      case 'sales':
+        response = await brain.generateOutreach(`Generate sales outreach for: ${message}\nContext: Australian business, professional tone\nUser: ${user.name}`);
+        return { text: `Here's your outreach:\n\n${response}`, actions: ['Personalise', 'Send', 'Track'] };
+      
+      case 'ops':
+        response = await brain.chat([{ role: 'user', content: message }], `\nYou are handling operations for ${user.name}. Focus on automation, invoicing, scheduling.`);
+        return { text: response, actions: ['Automate', 'Schedule', 'Invoice'] };
+      
+      default:
+        response = await brain.chat([{ role: 'user', content: message }]);
+        return { text: response, actions: [] };
+    }
+  } catch (error) {
+    console.error('AI generation error:', error);
+    return { text: `I encountered an issue generating that. Let me try a different approach.\n\nError: ${error.message}`, actions: ['Retry', 'Simplify request'] };
+  }
+}
+
+function generateFallbackResponse(agentKey, message, user) {
   const responses = {
     webBuilder: {
-      text: `I'll build that for you. Let me break down what I'm seeing:\n\n**Project Type:** Website/Web App\n**Estimated Complexity:** ${message.length > 100 ? 'High' : 'Medium'}\n\nHere's my approach:\n1. Design a responsive layout optimised for Australian audiences\n2. Build with clean, semantic HTML/CSS and modern JavaScript\n3. Ensure mobile-first design (most Aussie users are on mobile)\n4. Add SEO metadata for .com.au search visibility\n5. Deploy-ready output\n\nShall I start building?`,
+      text: `I'll build that website for you.\n\n**Project Type:** Website/Web App\n**Estimated Complexity:** ${message.length > 100 ? 'High' : 'Medium'}\n\nHere's my approach:\n1. Design a responsive layout optimised for Australian audiences\n2. Build with clean, semantic HTML/CSS and modern JavaScript\n3. Ensure mobile-first design (most Aussie users are on mobile)\n4. Add SEO metadata for .com.au search visibility\n5. Deploy-ready output\n\n**Note:** To get real AI-generated code, add ANTHROPIC_API_KEY or OPENAI_API_KEY to your .env file.\n\nShall I start building?`,
       actions: ['Design layout', 'Write code', 'Preview', 'Deploy']
     },
     appBuilder: {
-      text: `Building an app — here's my plan:\n\n**Platform:** Cross-platform (works on iOS + Android)\n**Approach:** Progressive Web App or React Native\n\nSteps:\n1. Define core features and user flows\n2. Design the UI with Australian UX patterns\n3. Build the frontend + backend\n4. Test on multiple devices\n5. Prepare for app store submission\n\nWhat's the main problem this app solves?`,
+      text: `Building an app — here's my plan:\n\n**Platform:** Cross-platform (works on iOS + Android)\n**Approach:** Progressive Web App or React Native\n\nSteps:\n1. Define core features and user flows\n2. Design the UI with Australian UX patterns\n3. Build the frontend + backend\n4. Test on multiple devices\n5. Prepare for app store submission\n\n**Note:** To get real AI-generated code, add ANTHROPIC_API_KEY or OPENAI_API_KEY to your .env file.\n\nWhat's the main problem this app solves?`,
       actions: ['Define features', 'Design UI', 'Build app', 'Test']
     },
     design: {
-      text: `Let's create something memorable.\n\n**Design Brief:**\n- Style: Modern, professional, Australian\n- Deliverables: Logo + brand assets\n- Formats: SVG, PNG, PDF\n\nI'll generate concepts based on your business type and target market. Australian businesses respond well to clean, confident branding — not flashy, not generic.\n\nTell me about your business and I'll start designing.`,
+      text: `Let's create something memorable.\n\n**Design Brief:**\n- Style: Modern, professional, Australian\n- Deliverables: Logo + brand assets\n- Formats: SVG, PNG, PDF\n\nI'll generate concepts based on your business type and target market. Australian businesses respond well to clean, confident branding — not flashy, not generic.\n\n**Note:** To get real AI-generated designs, add ANTHROPIC_API_KEY or OPENAI_API_KEY to your .env file.\n\nTell me about your business and I'll start designing.`,
       actions: ['Generate concepts', 'Refine', 'Export assets', 'Brand kit']
     },
     copywriter: {
-      text: `I'll write that for you.\n\n**Content Strategy:**\n- Tone: Professional Australian English (not American)\n- SEO: Optimised for AU search terms\n- Format: Ready to publish\n\nAustralian audiences respond to direct, honest language. No hype, no Americanisms. Just clear value propositions.\n\nWhat's the content for?`,
+      text: `I'll write that for you.\n\n**Content Strategy:**\n- Tone: Professional Australian English (not American)\n- SEO: Optimised for AU search terms\n- Format: Ready to publish\n\nAustralian audiences respond to direct, honest language. No hype, no Americanisms. Just clear value propositions.\n\n**Note:** To get real AI-generated copy, add ANTHROPIC_API_KEY or OPENAI_API_KEY to your .env file.\n\nWhat's the content for?`,
       actions: ['Draft content', 'SEO optimise', 'Edit tone', 'Publish']
     },
     data: {
-      text: `Let me analyse that data.\n\n**Analysis Plan:**\n1. Import and clean the data\n2. Identify key patterns and trends\n3. Generate visualisations\n4. Create an executive summary\n5. Export as report (PDF/Excel)\n\nUpload your data or describe what you need analysed.`,
+      text: `Let me analyse that data.\n\n**Analysis Plan:**\n1. Import and clean the data\n2. Identify key patterns and trends\n3. Generate visualisations\n4. Create an executive summary\n5. Export as report (PDF/Excel)\n\n**Note:** To get real AI analysis, add ANTHROPIC_API_KEY or OPENAI_API_KEY to your .env file.\n\nUpload your data or describe what you need analysed.`,
       actions: ['Import data', 'Analyse', 'Visualise', 'Export report']
     },
     code: {
-      text: `Let me write that code.\n\n**Stack Selection:**\n- Backend: Node.js (or Python if data-heavy)\n- Database: PostgreSQL or SQLite\n- Auth: JWT tokens\n- Deployment: Ready for Australian cloud providers\n\nI'll write clean, documented code with proper error handling.\n\nWhat does it need to do?`,
+      text: `Let me write that code.\n\n**Stack Selection:**\n- Backend: Node.js (or Python if data-heavy)\n- Database: PostgreSQL or SQLite\n- Auth: JWT tokens\n- Deployment: Ready for Australian cloud providers\n\nI'll write clean, documented code with proper error handling.\n\n**Note:** To get real AI-generated code, add ANTHROPIC_API_KEY or OPENAI_API_KEY to your .env file.\n\nWhat does it need to do?`,
       actions: ['Write code', 'Test', 'Document', 'Deploy']
     },
     sales: {
-      text: `Let's close this deal.\n\n**Sales Approach:**\n1. Qualify the lead (budget, timeline, fit)\n2. Generate a tailored quote in AUD\n3. Draft a professional proposal\n4. Set up follow-up sequence\n5. Request referral after delivery\n\nAustralian businesses want straight talk — clear pricing, no pressure, genuine value. That's how Titan sells.`,
+      text: `Let's close this deal.\n\n**Sales Approach:**\n1. Qualify the lead (budget, timeline, fit)\n2. Generate a tailored quote in AUD\n3. Draft a professional proposal\n4. Set up follow-up sequence\n5. Request referral after delivery\n\nAustralian businesses want straight talk — clear pricing, no pressure, genuine value. That's how Titan sells.\n\n**Note:** To get real AI-generated outreach, add ANTHROPIC_API_KEY or OPENAI_API_KEY to your .env file.`,
       actions: ['Qualify lead', 'Generate quote', 'Draft proposal', 'Follow up']
     },
     ops: {
-      text: `I'll handle the operations.\n\n**Tasks I can automate:**\n- Invoice generation (with ABN/GST)\n- Payment reminders\n- Scheduling and calendar management\n- Project status updates\n- Client communications\n\nEverything runs on autopilot once configured.`,
+      text: `I'll handle the operations.\n\n**Tasks I can automate:**\n- Invoice generation (with ABN/GST)\n- Payment reminders\n- Scheduling and calendar management\n- Project status updates\n- Client communications\n\nEverything runs on autopilot once configured.\n\n**Note:** To get real AI assistance, add ANTHROPIC_API_KEY or OPENAI_API_KEY to your .env file.`,
       actions: ['Create invoice', 'Set schedule', 'Automate workflow', 'Send update']
     }
   };

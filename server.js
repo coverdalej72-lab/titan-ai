@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
+require('dotenv').config();
 const stripeLib = require('./lib/stripe');
 
 const app = express();
@@ -279,12 +280,17 @@ app.get('/api/setup/status', auth, (req, res) => {
 });
 
 // ============ AGENT ROUTES ============
-app.post('/api/agent/route', auth, (req, res) => {
-  const { message, mode } = req.body;
-  // Agent router - determines which skill to use
-  const agentRouter = require('./agents/router');
-  const result = agentRouter.process(message, mode, req.user);
-  res.json(result);
+app.post('/api/agent/route', auth, async (req, res) => {
+  try {
+    const { message, mode } = req.body;
+    // Agent router - determines which skill to use
+    const agentRouter = require('./agents/router');
+    const result = await agentRouter.process(message, mode, req.user);
+    res.json(result);
+  } catch (error) {
+    console.error('Agent route error:', error);
+    res.status(500).json({ error: 'Agent processing failed', message: error.message });
+  }
 });
 
 // ============ VIEW ROUTES ============
