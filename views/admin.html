@@ -45,6 +45,7 @@
       <!-- TABS -->
       <div class="admin-tabs">
         <button class="admin-tab active" data-tab="overview">Overview</button>
+        <button class="admin-tab" data-tab="revenue">Revenue</button>
         <button class="admin-tab" data-tab="launchpad">Launch Pad</button>
         <button class="admin-tab" data-tab="autopilot">Autopilot</button>
         <button class="admin-tab" data-tab="leads">Hot Leads</button>
@@ -80,6 +81,54 @@
             <div class="stat-label">System Health</div>
             <div class="stat-value" style="color:var(--accent-green);">OK</div>
           </div>
+        </div>
+      </div>
+
+      <!-- REVENUE PANEL -->
+      <div class="admin-panel" id="panel-revenue">
+        <h2 style="font-family:var(--font-head);font-size:1.3rem;margin-bottom:0.5rem;">💰 Revenue Engine</h2>
+        <p style="color:var(--text-muted);font-size:0.9rem;margin-bottom:1.5rem;">Real-time money machine metrics.</p>
+        
+        <!-- Key Metrics -->
+        <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-bottom:2rem;">
+          <div class="stat-card" style="background:linear-gradient(135deg,rgba(16,185,129,0.1),rgba(6,182,212,0.1));border:1px solid rgba(16,185,129,0.3);">
+            <div class="stat-label">Monthly Recurring Revenue</div>
+            <div class="stat-value" id="mrrValue" style="color:var(--accent-green);font-size:2rem;">$0</div>
+            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:0.3rem;">AUD/month</div>
+          </div>
+          <div class="stat-card" style="background:linear-gradient(135deg,rgba(139,92,246,0.1),rgba(6,182,212,0.1));border:1px solid rgba(139,92,246,0.3);">
+            <div class="stat-label">Annual Run Rate</div>
+            <div class="stat-value" id="arrValue" style="color:var(--accent-purple);font-size:2rem;">$0</div>
+            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:0.3rem;">AUD/year</div>
+          </div>
+          <div class="stat-card" style="background:linear-gradient(135deg,rgba(245,158,11,0.1),rgba(239,68,68,0.1));border:1px solid rgba(245,158,11,0.3);">
+            <div class="stat-label">Profit Margin</div>
+            <div class="stat-value" id="marginValue" style="color:var(--accent-gold);font-size:2rem;">0%</div>
+            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:0.3rem;">Net margin</div>
+          </div>
+          <div class="stat-card" style="background:linear-gradient(135deg,rgba(6,182,212,0.1),rgba(139,92,246,0.1));border:1px solid rgba(6,182,212,0.3);">
+            <div class="stat-label">Credits Burned</div>
+            <div class="stat-value" id="creditsUsed" style="color:var(--accent-cyan);font-size:2rem;">0</div>
+            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:0.3rem;">This month</div>
+          </div>
+        </div>
+
+        <!-- Revenue Breakdown -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:2rem;">
+          <div class="stat-card">
+            <h3 style="font-family:var(--font-head);font-size:1.1rem;margin-bottom:1rem;">Revenue by Tier</h3>
+            <div id="revenueByTier" style="display:flex;flex-direction:column;gap:0.8rem;"></div>
+          </div>
+          <div class="stat-card">
+            <h3 style="font-family:var(--font-head);font-size:1.1rem;margin-bottom:1rem;">Cost vs Revenue</h3>
+            <div id="costVsRevenue" style="display:flex;flex-direction:column;gap:0.8rem;"></div>
+          </div>
+        </div>
+
+        <!-- Projections -->
+        <div class="stat-card">
+          <h3 style="font-family:var(--font-head);font-size:1.1rem;margin-bottom:1rem;">📈 Growth Projections</h3>
+          <div id="projections" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;"></div>
         </div>
       </div>
 
@@ -241,6 +290,81 @@
 
     loadAdmin();
     loadLaunchPad();
+    loadRevenue();
+
+    // Revenue Engine
+    async function loadRevenue() {
+      try {
+        const res = await fetch('/api/admin/revenue', { headers: { 'Authorization': `Bearer ${token}` } });
+        const data = await res.json();
+        
+        // Key metrics
+        document.getElementById('mrrValue').textContent = `$${Math.round(data.revenue.AUD).toLocaleString()}`;
+        document.getElementById('arrValue').textContent = `$${Math.round(data.arr.AUD).toLocaleString()}`;
+        document.getElementById('marginValue').textContent = data.profit.margin;
+        document.getElementById('creditsUsed').textContent = data.actuals.totalCreditsUsed.toLocaleString();
+        
+        // Revenue by tier
+        const tierDiv = document.getElementById('revenueByTier');
+        tierDiv.innerHTML = Object.entries(data.customers).map(([tier, count]) => {
+          const prices = { starter: 29, pro: 99, enterprise: 299 };
+          const revenue = count * prices[tier];
+          return `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem;background:rgba(255,255,255,0.02);border-radius:8px;">
+              <div>
+                <div style="font-weight:600;text-transform:capitalize;">${tier}</div>
+                <div style="font-size:0.8rem;color:var(--text-muted);">${count} customers</div>
+              </div>
+              <div style="text-align:right;">
+                <div style="font-weight:600;color:var(--accent-green);">$${revenue}</div>
+                <div style="font-size:0.8rem;color:var(--text-muted);">/month</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+        
+        // Cost vs Revenue
+        const costDiv = document.getElementById('costVsRevenue');
+        costDiv.innerHTML = `
+          <div style="display:flex;justify-content:space-between;padding:0.5rem;background:rgba(16,185,129,0.05);border-radius:8px;border-left:3px solid var(--accent-green);">
+            <span>Revenue</span>
+            <span style="font-weight:600;color:var(--accent-green);">$${Math.round(data.actuals.totalRevenueAUD)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:0.5rem;background:rgba(239,68,68,0.05);border-radius:8px;border-left:3px solid var(--accent-red);">
+            <span>Costs (API)</span>
+            <span style="font-weight:600;color:var(--accent-red);">$${Math.round(data.actuals.totalCostAUD)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:0.5rem;background:rgba(6,182,212,0.05);border-radius:8px;border-left:3px solid var(--accent-cyan);">
+            <span style="font-weight:700;">Profit</span>
+            <span style="font-weight:700;color:var(--accent-cyan);">$${Math.round(data.actuals.profitAUD)}</span>
+          </div>
+        `;
+        
+        // Projections
+        const projDiv = document.getElementById('projections');
+        const scenarios = [
+          { customers: 10, label: '10 customers' },
+          { customers: 50, label: '50 customers' },
+          { customers: 100, label: '100 customers' },
+          { customers: 500, label: '500 customers' }
+        ];
+        
+        projDiv.innerHTML = scenarios.map(s => {
+          const proj = data.projections || { revenue: { AUD: 0 } };
+          const mrr = s.customers * 99; // Assume avg $99/ customer
+          return `
+            <div style="padding:1rem;background:rgba(255,255,255,0.02);border-radius:8px;text-align:center;">
+              <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.5rem;">${s.label}</div>
+              <div style="font-size:1.5rem;font-weight:700;color:var(--accent-green);">$${mrr.toLocaleString()}</div>
+              <div style="font-size:0.75rem;color:var(--text-muted);">MRR (AUD)</div>
+            </div>
+          `;
+        }).join('');
+        
+      } catch (err) {
+        console.error('Failed to load revenue data:', err);
+      }
+    }
 
     // Launch Pad
     async function loadLaunchPad() {

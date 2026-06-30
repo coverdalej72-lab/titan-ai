@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 require('dotenv').config();
 const stripeLib = require('./lib/stripe');
+const creditSystem = require('./lib/credits');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,9 +17,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 // In-memory data store
 const db = {
   users: [
-    { id: '1', email: 'admin@titan.ai', password: 'titan2024', name: 'Admin', role: 'admin', plan: 'enterprise', abn: '', createdAt: new Date().toISOString() },
-    { id: '2', email: 'demo@titan.ai', password: 'demo2024', name: 'Demo User', role: 'user', plan: 'pro', abn: '', createdAt: new Date().toISOString() }
+    { id: '1', email: 'admin@titan.ai', password: 'titan2024', name: 'Admin', role: 'admin', plan: 'enterprise', credits: 2000, creditsUsed: 0, abn: '', createdAt: new Date().toISOString() },
+    { id: '2', email: 'demo@titan.ai', password: 'demo2024', name: 'Demo User', role: 'user', plan: 'pro', credits: 500, creditsUsed: 150, abn: '', createdAt: new Date().toISOString() }
   ],
+  creditTransactions: [],
   projects: [],
   leads: [],
   invoices: [],
@@ -226,6 +228,88 @@ app.get('/api/payments/plans', (req, res) => {
   res.json(stripeLib.PLANS);
 });
 
+// ============ CREDIT ROUTES ============
+app.get('/api/credits/balance', auth, (req, res) => {
+  const user = db.users.find(u => u.id === req.user.id);
+  res.json({
+    plan: user.plan,
+    credits: user.credits || 0,
+    creditsUsed: user.creditsUsed || 0,
+    creditsRemaining: (user.credits || 0) - (user.creditsUsed || 0)
+  });
+});
+
+app.get('/api/credits/transactions', auth, (req, res) => {
+  const transactions = db.creditTransactions
+    .filter(t => t.userId === req.user.id || req.user.role === 'admin')
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json(transactions);
+});
+
+app.get('/api/credits/pricing', (req, res) => {
+  res.json(creditSystem.pricing);
+});
+
+app.post('/api/credits/use', auth, async (req, res) => {
+  const { action, credits } = req.body;
+  const user = db.users.find(u => u.id === req.user.id);
+  
+  if (!user.credits) user.credits = 0;
+  if (!user.creditsUsed) user.creditsUsed = 0;
+  
+  const remaining = user.credits - user.creditsUsed;
+  if (remaining < credits) {
+    return res.status(402).json({ 
+      error: 'Insufficient credits',
+      required: credits,
+      remaining,
+      upgrade: '/api/payments/checkout'
+    });
+  }
+  
+  user.creditsUsed += credits;
+  
+  const transaction = {
+    id: crypto.randomBytes(8).toString('hex'),
+    userId: user.id,
+    action,
+    credits,
+    costAUD: credits * 0.02,
+    createdAt: new Date().toISOString()
+  };
+  db.creditTransactions.push(transaction);
+  
+  res.json({
+    success: true,
+    creditsUsed: user.creditsUsed,
+    creditsRemaining: user.credits - user.creditsUsed,
+    transaction
+  });
+});
+
+app.get('/api/credits/cost/:action', auth, (req, res) => {
+  const cost = creditSystem.calculateCost(req.params.action);
+  res.json(cost);
+});
+
+app.get('/api/admin/revenue', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  
+  const projections = creditSystem.projectMonthly(db.users.filter(u => u.plan !== 'free').length);
+  const totalCreditsUsed = db.users.reduce((sum, u) => sum + (u.creditsUsed || 0), 0);
+  const totalRevenue = totalCreditsUsed * 0.39; // $0.39 per credit revenue
+  
+  res.json({
+    ...projections,
+    actuals: {
+      totalCreditsUsed,
+      totalRevenueAUD: totalRevenue,
+      totalCostAUD: totalCreditsUsed * 0.02,
+      profitAUD: totalRevenue - (totalCreditsUsed * 0.02)
+    }
+  });
+});
+
 // ============ SETUP COMMANDS ============
 app.post('/api/setup/stripe', auth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
@@ -283,9 +367,50 @@ app.get('/api/setup/status', auth, (req, res) => {
 app.post('/api/agent/route', auth, async (req, res) => {
   try {
     const { message, mode } = req.body;
-    // Agent router - determines which skill to use
     const agentRouter = require('./agents/router');
     const result = await agentRouter.process(message, mode, req.user);
+    
+    // Calculate credits based on agent type
+    const creditCosts = {
+      webBuilder: 5,
+      appBuilder: 10,
+      design: 10,
+      copywriter: 3,
+      data: 5,
+      code: 5,
+      sales: 3,
+      ops: 3,
+      chat: 1,
+      setup: 0
+    };
+    
+    const creditCost = creditCosts[result.agentKey] || 1;
+    
+    // Deduct credits if brain is ready (real AI)
+    const brain = require('./lib/brain');
+    if (brain.isReady() && result.agentKey !== 'setup') {
+      const user = db.users.find(u => u.id === req.user.id);
+      if (!user.credits) user.credits = 0;
+      if (!user.creditsUsed) user.creditsUsed = 0;
+      
+      const remaining = user.credits - user.creditsUsed;
+      if (remaining >= creditCost) {
+        user.creditsUsed += creditCost;
+        db.creditTransactions.push({
+          id: crypto.randomBytes(8).toString('hex'),
+          userId: user.id,
+          action: `ai-${result.agentKey}`,
+          credits: creditCost,
+          costAUD: creditCost * 0.02,
+          createdAt: new Date().toISOString()
+        });
+        result.creditsUsed = creditCost;
+        result.creditsRemaining = user.credits - user.creditsUsed;
+      } else {
+        result.creditsWarning = 'Insufficient credits. Upgrade your plan.';
+      }
+    }
+    
     res.json(result);
   } catch (error) {
     console.error('Agent route error:', error);
