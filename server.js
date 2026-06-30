@@ -313,6 +313,7 @@ app.patch('/api/products/:id', auth, (req, res) => {
 
 // ============ DEPLOYMENT ROUTES ============
 const deploymentManager = require('./lib/deployment');
+const webhookManager = require('./lib/webhooks');
 
 app.get('/api/deploy/platforms', auth, (req, res) => {
   res.json(deploymentManager.getSupportedPlatforms());
@@ -346,6 +347,29 @@ app.post('/api/deploy/:projectId', auth, async (req, res) => {
 app.get('/api/deployments/:projectId', auth, (req, res) => {
   const deployments = db.prepare('SELECT * FROM deployments WHERE projectId = ? ORDER BY createdAt DESC').all(req.params.projectId);
   res.json(deployments);
+});
+
+// ============ WEBHOOK ROUTES ============
+app.get('/api/webhooks', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  res.json(webhookManager.getWebhooks());
+});
+
+app.post('/api/webhooks', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  const { event, url, secret } = req.body;
+  if (!event || !url) {
+    return res.status(400).json({ error: 'Event and URL required' });
+  }
+  const id = webhookManager.registerWebhook(event, url, secret);
+  res.json({ id, event, url, message: 'Webhook registered' });
+});
+
+app.delete('/api/webhooks/:id', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  const removed = webhookManager.removeWebhook(req.params.id);
+  if (!removed) return res.status(404).json({ error: 'Webhook not found' });
+  res.json({ success: true });
 });
 
 // ============ ANALYTICS ROUTES ============
