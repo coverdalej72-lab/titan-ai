@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
+const stripeLib = require('./lib/stripe');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -182,6 +183,45 @@ app.get('/api/admin/autopilot', auth, (req, res) => {
 
 app.get('/api/admin/health', auth, (req, res) => {
   res.json(db.systemHealth);
+});
+
+// ============ PAYMENT ROUTES ============
+app.post('/api/payments/checkout', auth, async (req, res) => {
+  try {
+    const { planId } = req.body;
+    if (!planId) return res.status(400).json({ error: 'Plan ID required' });
+    
+    const session = await stripeLib.createCheckoutSession(req.user, planId);
+    if (!session) return res.status(400).json({ error: 'Invalid plan or free tier' });
+    
+    res.json({ sessionId: session.id, url: session.url });
+  } catch (err) {
+    console.error('Checkout error:', err);
+    res.status(500).json({ error: 'Payment setup failed' });
+  }
+});
+
+app.post('/api/payments/portal', auth, async (req, res) => {
+  try {
+    if (!req.user.stripeCustomerId) {
+      return res.status(400).json({ error: 'No subscription found' });
+    }
+    
+    const session = await stripeLib.createPortalSession(req.user.stripeCustomerId);
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error('Portal error:', err);
+    res.status(500).json({ error: 'Portal setup failed' });
+  }
+});
+
+// Stripe webhook - needs raw body
+app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  await stripeLib.handleWebhook(req, res);
+});
+
+app.get('/api/payments/plans', (req, res) => {
+  res.json(stripeLib.PLANS);
 });
 
 // ============ AGENT ROUTES ============
