@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Projects — Titan AI</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="dashboard-page">
+    <div class="dashboard-bg"></div>
+    
+    <aside class="dash-sidebar">
+      <a href="/" class="logo-mark">
+        <div class="logo-icon">
+          <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+            <path d="M16 2L28 8V24L16 30L4 24V8L16 2Z" stroke="url(#lg)" stroke-width="2" fill="none"/>
+            <path d="M16 8L22 11V21L16 24L10 21V11L16 8Z" fill="url(#lg)"/>
+            <defs><linearGradient id="lg" x1="4" y1="2" x2="28" y2="30"><stop stop-color="#06b6d4"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
+          </svg>
+        </div>
+        <span class="logo-text">TITAN<span class="logo-accent">AI</span></span>
+      </a>
+      <nav class="dash-nav">
+        <a href="/dashboard"><span class="nav-icon">◈</span> Dashboard</a>
+        <a href="/studio"><span class="nav-icon">⚡</span> AI Studio</a>
+        <a href="/pipeline" class="active"><span class="nav-icon">▤</span> Projects</a>
+        <a href="#" onclick="logout()"><span class="nav-icon">⏻</span> Log Out</a>
+      </nav>
+    </aside>
+
+    <main class="dash-main">
+      <div class="dash-header">
+        <h1>Project Pipeline</h1>
+        <button class="btn btn-primary" onclick="newProject()">+ New Project</button>
+      </div>
+
+      <div class="pipeline-board">
+        <div class="pipeline-col">
+          <div class="pipeline-col-header">Intake <span class="count" id="count-intake">0</span></div>
+          <div class="pipeline-cards" id="col-intake"></div>
+        </div>
+        <div class="pipeline-col">
+          <div class="pipeline-col-header">Quoting <span class="count" id="count-quoting">0</span></div>
+          <div class="pipeline-cards" id="col-quoting"></div>
+        </div>
+        <div class="pipeline-col">
+          <div class="pipeline-col-header">Building <span class="count" id="count-building">0</span></div>
+          <div class="pipeline-cards" id="col-building"></div>
+        </div>
+        <div class="pipeline-col">
+          <div class="pipeline-col-header">Review <span class="count" id="count-review">0</span></div>
+          <div class="pipeline-cards" id="col-review"></div>
+        </div>
+        <div class="pipeline-col">
+          <div class="pipeline-col-header">Delivered <span class="count" id="count-delivered">0</span></div>
+          <div class="pipeline-cards" id="col-delivered"></div>
+        </div>
+        <div class="pipeline-col">
+          <div class="pipeline-col-header">Paid <span class="count" id="count-paid">0</span></div>
+          <div class="pipeline-cards" id="col-paid"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('titan_token');
+    const user = JSON.parse(localStorage.getItem('titan_user') || 'null');
+    if (!token || !user) { window.location.href = '/login'; }
+
+    async function loadProjects() {
+      try {
+        const res = await fetch('/api/projects', { headers: { 'Authorization': `Bearer ${token}` } });
+        const projects = await res.json();
+        
+        const statuses = ['intake', 'quoting', 'building', 'review', 'delivered', 'paid'];
+        statuses.forEach(status => {
+          const col = document.getElementById(`col-${status}`);
+          const items = projects.filter(p => p.status === status);
+          document.getElementById(`count-${status}`).textContent = items.length;
+          col.innerHTML = items.map(p => `
+            <div class="pipeline-card" onclick="viewProject('${p.id}')">
+              <h4>${p.title || 'Untitled'}</h4>
+              <p>${p.description || p.type || 'No description'}</p>
+              <div class="card-meta">
+                <span>${p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-AU') : ''}</span>
+                <span>${p.price ? '$' + p.price + ' AUD' : ''}</span>
+              </div>
+            </div>
+          `).join('') || '<div style="color:var(--text-muted);font-size:0.8rem;text-align:center;padding:1rem;">No projects</div>';
+        });
+      } catch (err) {
+        console.error('Failed to load projects:', err);
+      }
+    }
+
+    function newProject() {
+      const title = prompt('Project name:');
+      if (!title) return;
+      fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ title, description: 'New project' })
+      }).then(() => loadProjects());
+    }
+
+    function viewProject(id) {
+      alert('Project details coming soon. ID: ' + id);
+    }
+
+    function logout() {
+      localStorage.removeItem('titan_token');
+      localStorage.removeItem('titan_user');
+      window.location.href = '/';
+    }
+
+    loadProjects();
+  </script>
+</body>
+</html>

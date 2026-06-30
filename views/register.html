@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign Up — Titan AI</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="auth-page">
+    <div class="auth-bg">
+      <div class="mesh-gradient"></div>
+      <div class="grain-overlay"></div>
+    </div>
+    <div class="auth-card fade-in-up">
+      <div style="text-align:center;margin-bottom:1.5rem;">
+        <svg width="40" height="40" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2L28 8V24L16 30L4 24V8L16 2Z" stroke="url(#lg)" stroke-width="2" fill="none"/>
+          <path d="M16 8L22 11V21L16 24L10 21V11L16 8Z" fill="url(#lg)"/>
+          <defs><linearGradient id="lg" x1="4" y1="2" x2="28" y2="30"><stop stop-color="#06b6d4"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
+        </svg>
+      </div>
+      <h2>Start building free</h2>
+      <p class="subtitle">Create your Titan AI workspace in seconds</p>
+      <form id="registerForm">
+        <div class="form-group">
+          <label>Full Name</label>
+          <input type="text" id="name" placeholder="John Smith" required>
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="email" placeholder="you@business.com.au" required>
+        </div>
+        <div class="form-group">
+          <label>ABN (optional)</label>
+          <input type="text" id="abn" placeholder="12 345 678 901">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="password" placeholder="Create a password" required minlength="6">
+        </div>
+        <button type="submit" class="btn btn-primary btn-full btn-lg">Create Account</button>
+      </form>
+      <div class="auth-footer">
+        <p>Already have an account? <a href="/login">Log in</a></p>
+      </div>
+      <div id="regError" style="color:var(--accent-red);font-size:0.85rem;text-align:center;margin-top:1rem;display:none;"></div>
+    </div>
+  </div>
+  <script>
+    document.getElementById('registerForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('name').value;
+      const email = document.getElementById('email').value;
+      const abn = document.getElementById('abn').value;
+      const password = document.getElementById('password').value;
+      try {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ name, email, abn, password })
+        });
+        const data = await res.json();
+        if (!res.ok) { document.getElementById('regError').textContent = data.error; document.getElementById('regError').style.display = 'block'; return; }
+        localStorage.setItem('titan_token', data.token);
+        localStorage.setItem('titan_user', JSON.stringify(data.user));
+        window.location.href = '/dashboard';
+      } catch (err) {
+        document.getElementById('regError').textContent = 'Connection error. Try again.';
+        document.getElementById('regError').style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>

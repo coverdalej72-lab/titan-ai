@@ -1,0 +1,12 @@
+{
+  "name": "titan-ai",
+  "version": "1.0.0",
+  "description": "Titan AI — Australian-First AI Business Platform",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

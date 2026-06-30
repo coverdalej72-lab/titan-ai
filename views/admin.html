@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — Titan AI</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="dashboard-page">
+    <div class="dashboard-bg"></div>
+    
+    <aside class="dash-sidebar">
+      <a href="/" class="logo-mark">
+        <div class="logo-icon">
+          <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+            <path d="M16 2L28 8V24L16 30L4 24V8L16 2Z" stroke="url(#lg)" stroke-width="2" fill="none"/>
+            <path d="M16 8L22 11V21L16 24L10 21V11L16 8Z" fill="url(#lg)"/>
+            <defs><linearGradient id="lg" x1="4" y1="2" x2="28" y2="30"><stop stop-color="#06b6d4"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
+          </svg>
+        </div>
+        <span class="logo-text">TITAN<span class="logo-accent">AI</span></span>
+      </a>
+      <div style="padding:0 1.5rem;margin-bottom:1rem;">
+        <img src="/images/appcovi-logo.png" alt="AppCovi" style="height:24px;opacity:0.6;">
+      </div>
+      <nav class="dash-nav">
+        <a href="/dashboard"><span class="nav-icon">◈</span> Dashboard</a>
+        <a href="/studio"><span class="nav-icon">⚡</span> AI Studio</a>
+        <a href="/pipeline"><span class="nav-icon">▤</span> Projects</a>
+        <a href="/admin" class="active"><span class="nav-icon">⚙</span> Admin</a>
+        <a href="#" onclick="logout()"><span class="nav-icon">⏻</span> Log Out</a>
+      </nav>
+    </aside>
+
+    <main class="dash-main">
+      <div class="dash-header">
+        <h1>Admin Control Panel</h1>
+        <div class="user-info">
+          <div class="user-avatar" id="adminAvatar">A</div>
+        </div>
+      </div>
+
+      <!-- TABS -->
+      <div class="admin-tabs">
+        <button class="admin-tab active" data-tab="overview">Overview</button>
+        <button class="admin-tab" data-tab="launchpad">Launch Pad</button>
+        <button class="admin-tab" data-tab="autopilot">Autopilot</button>
+        <button class="admin-tab" data-tab="leads">Hot Leads</button>
+        <button class="admin-tab" data-tab="health">Self-Heal</button>
+        <button class="admin-tab" data-tab="ideas">Ideas Vault</button>
+        <button class="admin-tab" data-tab="users">Users</button>
+      </div>
+
+      <!-- OVERVIEW PANEL -->
+      <div class="admin-panel active" id="panel-overview">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Total Users</div>
+            <div class="stat-value" id="adminUsers">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Total Projects</div>
+            <div class="stat-value" id="adminProjects">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Revenue (AUD)</div>
+            <div class="stat-value" id="adminRevenue">$0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Active Leads</div>
+            <div class="stat-value" id="adminLeads">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Autopilot Jobs</div>
+            <div class="stat-value" id="adminJobs">8</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">System Health</div>
+            <div class="stat-value" style="color:var(--accent-green);">OK</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LAUNCH PAD PANEL -->
+      <div class="admin-panel" id="panel-launchpad">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+          <div>
+            <h2 style="font-family:var(--font-head);font-size:1.3rem;">Launch Pad</h2>
+            <p style="color:var(--text-muted);font-size:0.9rem;margin-top:0.3rem;">Manage and launch your apps, websites, and programs.</p>
+          </div>
+          <button class="btn btn-primary" onclick="launchNew()">+ Launch New</button>
+        </div>
+        <div class="stats-grid" style="margin-bottom:2rem;">
+          <div class="stat-card">
+            <div class="stat-label">Live Products</div>
+            <div class="stat-value" id="liveCount" style="color:var(--accent-green);">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">In Staging</div>
+            <div class="stat-value" id="stagingCount" style="color:var(--accent-gold);">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Total Revenue</div>
+            <div class="stat-value" id="productRevenue">$0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Active Users</div>
+            <div class="stat-value" id="productUsers">0</div>
+          </div>
+        </div>
+        <div id="launchpadGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:1.5rem;"></div>
+      </div>
+
+      <!-- AUTOPILOT PANEL -->
+      <div class="admin-panel" id="panel-autopilot">
+        <h2 style="font-family:var(--font-head);font-size:1.3rem;margin-bottom:1rem;">Scheduled Jobs</h2>
+        <table class="data-table">
+          <thead><tr><th>Job</th><th>Schedule</th><th>Last Run</th><th>Status</th></tr></thead>
+          <tbody id="autopilotTable"></tbody>
+        </table>
+      </div>
+
+      <!-- LEADS PANEL -->
+      <div class="admin-panel" id="panel-leads">
+        <h2 style="font-family:var(--font-head);font-size:1.3rem;margin-bottom:1rem;">Hot Leads</h2>
+        <p style="color:var(--text-muted);margin-bottom:1rem;">AI-drafted outreach emails ready for review and send.</p>
+        <div id="leadsList">
+          <div class="stat-card" style="text-align:center;color:var(--text-muted);padding:2rem;">
+            No leads yet. Titan will auto-generate leads based on your Ideas Vault.
+          </div>
+        </div>
+      </div>
+
+      <!-- HEALTH PANEL -->
+      <div class="admin-panel" id="panel-health">
+        <h2 style="font-family:var(--font-head);font-size:1.3rem;margin-bottom:1rem;">System Health</h2>
+        <p style="color:var(--text-muted);margin-bottom:1rem;">Self-heal probes 8 surfaces every 15 minutes.</p>
+        <div class="stats-grid" id="healthGrid"></div>
+      </div>
+
+      <!-- IDEAS PANEL -->
+      <div class="admin-panel" id="panel-ideas">
+        <h2 style="font-family:var(--font-head);font-size:1.3rem;margin-bottom:1rem;">Ideas Vault</h2>
+        <p style="color:var(--text-muted);margin-bottom:1rem;">Track build ideas from concept to selling.</p>
+        <div class="pipeline-board" id="ideasBoard"></div>
+      </div>
+
+      <!-- USERS PANEL -->
+      <div class="admin-panel" id="panel-users">
+        <h2 style="font-family:var(--font-head);font-size:1.3rem;margin-bottom:1rem;">Users</h2>
+        <table class="data-table">
+          <thead><tr><th>Name</th><th>Email</th><th>Plan</th><th>Role</th></tr></thead>
+          <tbody id="usersTable"></tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('titan_token');
+    const user = JSON.parse(localStorage.getItem('titan_user') || 'null');
+    if (!token || !user || user.role !== 'admin') { window.location.href = '/dashboard'; }
+
+    document.getElementById('adminAvatar').textContent = (user.name || 'A')[0];
+
+    // Tab switching
+    document.querySelectorAll('.admin-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.admin-panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(`panel-${tab.dataset.tab}`).classList.add('active');
+      });
+    });
+
+    // Load data
+    async function loadAdmin() {
+      try {
+        const [stats, autopilot, health, ideas] = await Promise.all([
+          fetch('/api/admin/stats', { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()),
+          fetch('/api/admin/autopilot', { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()),
+          fetch('/api/admin/health', { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()),
+          fetch('/api/ideas', { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json())
+        ]);
+
+        // Stats
+        document.getElementById('adminUsers').textContent = stats.totalUsers;
+        document.getElementById('adminProjects').textContent = stats.totalProjects;
+        document.getElementById('adminRevenue').textContent = `$${stats.totalRevenue}`;
+        document.getElementById('adminLeads').textContent = stats.activeLeads;
+
+        // Autopilot
+        const tbody = document.getElementById('autopilotTable');
+        tbody.innerHTML = autopilot.map(job => `
+          <tr>
+            <td>${job.name}</td>
+            <td>${job.schedule}</td>
+            <td>${job.lastRun ? new Date(job.lastRun).toLocaleString('en-AU') : 'Never'}</td>
+            <td><span class="status-badge active">Active</span></td>
+          </tr>
+        `).join('');
+
+        // Health
+        const healthGrid = document.getElementById('healthGrid');
+        healthGrid.innerHTML = Object.entries(health).map(([key, status]) => `
+          <div class="stat-card">
+            <div class="stat-label">${key}</div>
+            <div class="stat-value" style="color:${status === 'ok' ? 'var(--accent-green)' : 'var(--accent-gold)'};">
+              ${status === 'ok' ? '✓' : '⚠'} ${status.toUpperCase()}
+            </div>
+          </div>
+        `).join('');
+
+        // Ideas
+        const ideasBoard = document.getElementById('ideasBoard');
+        const statuses = ['idea', 'hot', 'in-progress', 'built', 'selling'];
+        ideasBoard.innerHTML = statuses.map(status => {
+          const items = ideas.filter(i => i.status === status);
+          return `
+            <div class="pipeline-col">
+              <div class="pipeline-col-header">${status} <span class="count">${items.length}</span></div>
+              <div class="pipeline-cards">
+                ${items.map(i => `
+                  <div class="pipeline-card">
+                    <h4>${i.title}</h4>
+                    <p>${i.description}</p>
+                    <div class="card-meta"><span>$${i.price} AUD</span><span>${i.market}</span></div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `;
+        }).join('');
+
+      } catch (err) {
+        console.error('Failed to load admin data:', err);
+      }
+    }
+
+    loadAdmin();
+    loadLaunchPad();
+
+    // Launch Pad
+    async function loadLaunchPad() {
+      try {
+        const res = await fetch('/api/products', { headers: { 'Authorization': `Bearer ${token}` } });
+        const products = await res.json();
+        
+        // Update stats
+        const live = products.filter(p => p.status === 'live');
+        const staging = products.filter(p => p.status === 'staging');
+        document.getElementById('liveCount').textContent = live.length;
+        document.getElementById('stagingCount').textContent = staging.length;
+        document.getElementById('productRevenue').textContent = `$${products.reduce((sum, p) => sum + (p.revenue || 0), 0)}`;
+        document.getElementById('productUsers').textContent = products.reduce((sum, p) => sum + (p.users || 0), 0);
+        
+        // Render grid
+        const grid = document.getElementById('launchpadGrid');
+        grid.innerHTML = products.map(p => `
+          <div class="feature-card" style="cursor:pointer;" onclick="manageProduct('${p.id}')">
+            <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:1rem;">
+              <div>
+                <h3 style="margin-bottom:0.3rem;">${p.name}</h3>
+                <p style="font-size:0.85rem;color:var(--text-muted);">${p.type} • ${p.category}</p>
+              </div>
+              <span class="status-badge ${p.status}">${p.status}</span>
+            </div>
+            <p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:1rem;">${p.description}</p>
+            <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:var(--text-muted);padding-top:1rem;border-top:1px solid var(--border);">
+              <span>🌐 ${p.url || 'Not deployed'}</span>
+              <span>💰 $${p.revenue || 0} AUD</span>
+            </div>
+            <div style="display:flex;gap:0.5rem;margin-top:1rem;">
+              ${p.status === 'staging' ? '<button class="btn btn-primary" style="padding:0.4rem 0.8rem;font-size:0.8rem;" onclick="event.stopPropagation();goLive(\\'${p.id}\\')">Go Live</button>' : ''}
+              ${p.url ? `<a href="${p.url}" target="_blank" class="btn btn-outline" style="padding:0.4rem 0.8rem;font-size:0.8rem;" onclick="event.stopPropagation();">Visit</a>` : ''}
+            </div>
+          </div>
+        `).join('') || '<div class="stat-card" style="text-align:center;color:var(--text-muted);padding:3rem;grid-column:1/-1;">No products launched yet. Build something amazing in AI Studio.</div>';
+      } catch (err) {
+        console.error('Failed to load launch pad:', err);
+      }
+    }
+
+    function launchNew() {
+      const name = prompt('Product name:');
+      if (!name) return;
+      const type = prompt('Type (website/app/program/tool):', 'website');
+      const description = prompt('Description:');
+      
+      fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ name, type, description, category: 'general', status: 'staging' })
+      }).then(() => loadLaunchPad());
+    }
+
+    function manageProduct(id) {
+      alert(`Product management for ${id} — coming soon. For now, use AI Studio to update.`);
+    }
+
+    function goLive(id) {
+      if (confirm('Launch this product to production?')) {
+        fetch(`/api/products/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ status: 'live', launchedAt: new Date().toISOString() })
+        }).then(() => loadLaunchPad());
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem('titan_token');
+      localStorage.removeItem('titan_user');
+      window.location.href = '/';
+    }
+  </script>
+</body>
+</html>

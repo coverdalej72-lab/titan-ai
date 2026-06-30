@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — Titan AI</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="dashboard-page">
+    <div class="dashboard-bg"></div>
+    
+    <!-- SIDEBAR -->
+    <aside class="dash-sidebar">
+      <a href="/" class="logo-mark">
+        <div class="logo-icon">
+          <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+            <path d="M16 2L28 8V24L16 30L4 24V8L16 2Z" stroke="url(#lg)" stroke-width="2" fill="none"/>
+            <path d="M16 8L22 11V21L16 24L10 21V11L16 8Z" fill="url(#lg)"/>
+            <defs><linearGradient id="lg" x1="4" y1="2" x2="28" y2="30"><stop stop-color="#06b6d4"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
+          </svg>
+        </div>
+        <span class="logo-text">TITAN<span class="logo-accent">AI</span></span>
+      </a>
+      <nav class="dash-nav">
+        <a href="/dashboard" class="active"><span class="nav-icon">◈</span> Dashboard</a>
+        <a href="/studio"><span class="nav-icon">⚡</span> AI Studio</a>
+        <a href="/pipeline"><span class="nav-icon">▤</span> Projects</a>
+        <a href="#" onclick="logout()"><span class="nav-icon">⏻</span> Log Out</a>
+      </nav>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="dash-main">
+      <div class="dash-header">
+        <div>
+          <h1>Good <span id="greeting"></span>, <span id="userName"></span></h1>
+          <p style="color:var(--text-muted);font-size:0.9rem;margin-top:0.3rem;">Here's what Titan's been working on.</p>
+        </div>
+        <div class="user-info">
+          <span id="userPlan" class="status-badge info"></span>
+          <div class="user-avatar" id="userAvatar"></div>
+        </div>
+      </div>
+
+      <!-- STATS -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Active Projects</div>
+          <div class="stat-value" id="statProjects">0</div>
+          <div class="stat-change up">↑ Titan building</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">AI Credits Used</div>
+          <div class="stat-value" id="statCredits">0</div>
+          <div class="stat-change">This month</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Builds Completed</div>
+          <div class="stat-value" id="statBuilds">0</div>
+          <div class="stat-change up">↑ All time</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Next Invoice</div>
+          <div class="stat-value" id="statInvoice">$0</div>
+          <div class="stat-change">AUD</div>
+        </div>
+      </div>
+
+      <!-- RECENT ACTIVITY -->
+      <div style="margin-top:2rem;">
+        <h2 style="font-family:var(--font-head);font-size:1.3rem;font-weight:700;margin-bottom:1rem;">Recent Activity</h2>
+        <div id="activityList" style="display:flex;flex-direction:column;gap:0.8rem;">
+          <div class="stat-card" style="text-align:center;color:var(--text-muted);padding:3rem;">
+            <p>No activity yet. Head to <a href="/studio" style="color:var(--accent-cyan);">AI Studio</a> to start building.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- QUICK ACTIONS -->
+      <div style="margin-top:2rem;">
+        <h2 style="font-family:var(--font-head);font-size:1.3rem;font-weight:700;margin-bottom:1rem;">Quick Actions</h2>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;">
+          <a href="/studio?mode=web" class="feature-card" style="text-decoration:none;display:block;">
+            <div class="feature-icon web"></div>
+            <h3>Build Website</h3>
+            <p>Create a responsive website</p>
+          </a>
+          <a href="/studio?mode=design" class="feature-card" style="text-decoration:none;display:block;">
+            <div class="feature-icon design"></div>
+            <h3>Design Logo</h3>
+            <p>Generate brand identity</p>
+          </a>
+          <a href="/studio?mode=copy" class="feature-card" style="text-decoration:none;display:block;">
+            <div class="feature-icon copy"></div>
+            <h3>Write Content</h3>
+            <p>Blog posts, ads, emails</p>
+          </a>
+          <a href="/studio?mode=app" class="feature-card" style="text-decoration:none;display:block;">
+            <div class="feature-icon app"></div>
+            <h3>Build App</h3>
+            <p>Mobile or desktop app</p>
+          </a>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // Auth check
+    const token = localStorage.getItem('titan_token');
+    const user = JSON.parse(localStorage.getItem('titan_user') || 'null');
+    if (!token || !user) { window.location.href = '/login'; }
+    
+    // Set user info
+    document.getElementById('userName').textContent = user.name || 'User';
+    document.getElementById('userPlan').textContent = user.plan.toUpperCase();
+    document.getElementById('userAvatar').textContent = (user.name || 'U')[0].toUpperCase();
+    
+    // Greeting based on AEST time
+    const hour = new Date().getHours();
+    let greeting = 'evening';
+    if (hour < 12) greeting = 'morning';
+    else if (hour < 17) greeting = 'afternoon';
+    document.getElementById('greeting').textContent = greeting;
+    
+    // Mock stats
+    document.getElementById('statProjects').textContent = '3';
+    document.getElementById('statCredits').textContent = '247';
+    document.getElementById('statBuilds').textContent = '12';
+    document.getElementById('statInvoice').textContent = '$79';
+    
+    function logout() {
+      localStorage.removeItem('titan_token');
+      localStorage.removeItem('titan_user');
+      window.location.href = '/';
+    }
+  </script>
+</body>
+</html>
