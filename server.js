@@ -314,6 +314,7 @@ app.patch('/api/products/:id', auth, (req, res) => {
 // ============ DEPLOYMENT ROUTES ============
 const deploymentManager = require('./lib/deployment');
 const webhookManager = require('./lib/webhooks');
+const notificationManager = require('./lib/notifications');
 
 app.get('/api/deploy/platforms', auth, (req, res) => {
   res.json(deploymentManager.getSupportedPlatforms());
@@ -370,6 +371,56 @@ app.delete('/api/webhooks/:id', auth, (req, res) => {
   const removed = webhookManager.removeWebhook(req.params.id);
   if (!removed) return res.status(404).json({ error: 'Webhook not found' });
   res.json({ success: true });
+});
+
+// ============ NOTIFICATION ROUTES ============
+app.get('/api/notifications', auth, (req, res) => {
+  const filters = req.query;
+  res.json(notificationManager.getNotifications(filters));
+});
+
+app.post('/api/notifications/email', auth, async (req, res) => {
+  try {
+    const { to, subject, body } = req.body;
+    if (!to || !subject || !body) {
+      return res.status(400).json({ error: 'to, subject, and body required' });
+    }
+    const notification = await notificationManager.sendEmail(to, subject, body);
+    res.json(notification);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to send email' });
+  }
+});
+
+app.post('/api/notifications/sms', auth, async (req, res) => {
+  try {
+    const { to, message } = req.body;
+    if (!to || !message) {
+      return res.status(400).json({ error: 'to and message required' });
+    }
+    const notification = await notificationManager.sendSMS(to, message);
+    res.json(notification);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to send SMS' });
+  }
+});
+
+app.post('/api/notifications/inapp', auth, async (req, res) => {
+  try {
+    const { userId, title, message } = req.body;
+    if (!userId || !title || !message) {
+      return res.status(400).json({ error: 'userId, title, and message required' });
+    }
+    const notification = await notificationManager.sendInApp(userId, title, message);
+    res.json(notification);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to send in-app notification' });
+  }
+});
+
+app.get('/api/notifications/stats', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  res.json(notificationManager.getStats());
 });
 
 // ============ ANALYTICS ROUTES ============
