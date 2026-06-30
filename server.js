@@ -380,6 +380,7 @@ app.post('/api/agent/route', auth, async (req, res) => {
       code: 5,
       sales: 3,
       ops: 3,
+      avatar: 10,
       chat: 1,
       setup: 0
     };
@@ -426,6 +427,7 @@ app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'views', '
 app.get('/studio', (req, res) => res.sendFile(path.join(__dirname, 'views', 'studio.html')));
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'views', 'admin.html')));
 app.get('/pipeline', (req, res) => res.sendFile(path.join(__dirname, 'views', 'pipeline.html')));
+app.get('/avatar', (req, res) => res.sendFile(path.join(__dirname, 'views', 'avatar.html')));
 
 // Fire autopilot on startup
 console.log('🔥 Titan AI — Australian-First AI Business Platform');

@@ -57,6 +57,12 @@ const skills = {
     triggers: ['invoice', 'payment', 'schedule', 'calendar', 'task', 'project manage', 'team', 'workflow', 'automate'],
     description: 'Manages business operations',
     capabilities: ['Invoice generation', 'Payment processing', 'Scheduling', 'Task management', 'Workflow automation']
+  },
+  avatar: {
+    name: 'Avatar Generator',
+    triggers: ['avatar', 'profile picture', 'headshot', 'portrait', 'character', 'mascot', 'persona'],
+    description: 'Generates professional avatars and profile pictures',
+    capabilities: ['Professional headshots', 'Character avatars', 'Brand mascots', 'Team portraits', 'Social media profiles']
   }
 };
 
@@ -104,7 +110,8 @@ async function process(message, mode, user) {
     'data': 'data',
     'code': 'code',
     'sales': 'sales',
-    'ops': 'ops'
+    'ops': 'ops',
+    'avatar': 'avatar'
   };
   
   let agentKey = modeMap[mode] || classify(message);
@@ -175,6 +182,10 @@ async function generateAIResponse(agentKey, message, user) {
       case 'ops':
         response = await brain.chat([{ role: 'user', content: message }], `\nYou are handling operations for ${user.name}. Focus on automation, invoicing, scheduling.`);
         return { text: response, actions: ['Automate', 'Schedule', 'Invoice'] };
+      
+      case 'avatar':
+        response = await brain.generateAvatar(`Generate avatar: ${message}\nUser: ${user.name}`);
+        return { text: `Here's your avatar:\n\n${response}`, actions: ['Download', 'Regenerate', 'Customize'] };
       
       default:
         response = await brain.chat([{ role: 'user', content: message }]);

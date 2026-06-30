@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Avatar Generator - Titan AI</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="avatar-generator">
+    <header class="page-header">
+      <h1>Avatar Generator</h1>
+      <p>Create professional avatars for your business</p>
+    </header>
+
+    <div class="generator-container">
+      <div class="generator-form">
+        <div class="form-group">
+          <label for="avatarStyle">Avatar Style</label>
+          <select id="avatarStyle">
+            <option value="professional">Professional Headshot</option>
+            <option value="casual">Casual Professional</option>
+            <option value="creative">Creative/Artistic</option>
+            <option value="cartoon">Cartoon/Character</option>
+            <option value="cyberpunk">Cyberpunk/Futuristic</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="avatarDescription">Description</label>
+          <textarea id="avatarDescription" rows="4" placeholder="Describe your avatar... (e.g., 'friendly business owner in blue shirt', 'tech startup founder with glasses')"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="avatarCount">Number of Variations</label>
+          <select id="avatarCount">
+            <option value="1">1 Avatar (5 credits)</option>
+            <option value="3">3 Avatars (12 credits)</option>
+            <option value="5">5 Avatars (20 credits)</option>
+          </select>
+        </div>
+
+        <button id="generateBtn" class="btn btn-primary">Generate Avatars</button>
+      </div>
+
+      <div class="generator-results" id="resultsSection" style="display: none;">
+        <h2>Your Avatars</h2>
+        <div class="avatar-grid" id="avatarGrid"></div>
+        <div class="results-actions">
+          <button id="downloadAllBtn" class="btn btn-secondary">Download All</button>
+          <button id="generateMoreBtn" class="btn btn-outline">Generate More</button>
+        </div>
+      </div>
+
+      <div class="loading" id="loadingSection" style="display: none;">
+        <div class="spinner"></div>
+        <p>Generating your avatars...</p>
+      </div>
+    </div>
+
+    <div class="pricing-info">
+      <h3>Avatar Pricing</h3>
+      <ul>
+        <li><strong>1 Avatar:</strong> 5 credits</li>
+        <li><strong>3 Avatars:</strong> 12 credits (save 20%)</li>
+        <li><strong>5 Avatars:</strong> 20 credits (save 33%)</li>
+      </ul>
+      <p class="credit-balance">Your balance: <span id="creditBalance">0</span> credits</p>
+    </div>
+  </div>
+
+  <script>
+    const creditBalanceEl = document.getElementById('creditBalance');
+    const generateBtn = document.getElementById('generateBtn');
+    const downloadAllBtn = document.getElementById('downloadAllBtn');
+    const generateMoreBtn = document.getElementById('generateMoreBtn');
+    const resultsSection = document.getElementById('resultsSection');
+    const loadingSection = document.getElementById('loadingSection');
+    const avatarGrid = document.getElementById('avatarGrid');
+
+    // Load credit balance
+    async function loadCredits() {
+      const token = localStorage.getItem('titan_token');
+      const response = await fetch('/api/credits/balance', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      creditBalanceEl.textContent = data.remaining;
+    }
+
+    // Generate avatars
+    generateBtn.addEventListener('click', async () => {
+      const style = document.getElementById('avatarStyle').value;
+      const description = document.getElementById('avatarDescription').value;
+      const count = parseInt(document.getElementById('avatarCount').value);
+
+      if (!description.trim()) {
+        alert('Please describe your avatar');
+        return;
+      }
+
+      const token = localStorage.getItem('titan_token');
+      
+      // Show loading
+      generateBtn.style.display = 'none';
+      loadingSection.style.display = 'flex';
+      resultsSection.style.display = 'none';
+
+      try {
+        const response = await fetch('/api/agent/route', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            message: `Generate ${count} ${style} avatar(s): ${description}`,
+            mode: 'avatar'
+          })
+        });
+
+        const data = await response.json();
+        
+        if (data.success) {
+          displayAvatars(data.avatars);
+          resultsSection.style.display = 'block';
+          loadCredits(); // Refresh balance
+        } else {
+          alert(data.error || 'Failed to generate avatars');
+        }
+      } catch (error) {
+        console.error('Error generating avatars:', error);
+        alert('Error generating avatars. Please try again.');
+      } finally {
+        loadingSection.style.display = 'none';
+        generateBtn.style.display = 'block';
+      }
+    });
+
+    // Display avatars
+    function displayAvatars(avatars) {
+      avatarGrid.innerHTML = '';
+      
+      avatars.forEach((avatar, index) => {
+        const avatarCard = document.createElement('div');
+        avatarCard.className = 'avatar-card';
+        avatarCard.innerHTML = `
+          <img src="${avatar.url}" alt="Avatar ${index + 1}" />
+          <div class="avatar-actions">
+            <button class="btn btn-small" onclick="downloadAvatar('${avatar.url}', ${index + 1})">Download</button>
+          </div>
+        `;
+        avatarGrid.appendChild(avatarCard);
+      });
+    }
+
+    // Download single avatar
+    window.downloadAvatar = function(url, index) {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `avatar-${index}-${Date.now()}.png`;
+      link.click();
+    };
+
+    // Download all avatars
+    downloadAllBtn.addEventListener('click', () => {
+      const images = avatarGrid.querySelectorAll('img');
+      images.forEach((img, index) => {
+        setTimeout(() => {
+          downloadAvatar(img.src, index + 1);
+        }, index * 500); // Stagger downloads
+      });
+    });
+
+    // Generate more
+    generateMoreBtn.addEventListener('click', () => {
+      resultsSection.style.display = 'none';
+      generateBtn.style.display = 'block';
+    });
+
+    // Initialize
+    loadCredits();
+  </script>
+</body>
+</html>
