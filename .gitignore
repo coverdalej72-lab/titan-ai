@@ -2,5 +2,9 @@ node_modules/
 .env
 *.log
 .DS_Store
+titan.db
+titan.db-shm
+titan.db-wal
+*.sqlite
 titan.log
 npm-debug.log*

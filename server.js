@@ -2,235 +2,460 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
+const Database = require('better-sqlite3');
 require('dotenv').config();
-const stripeLib = require('./lib/stripe');
-const creditSystem = require('./lib/credits');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Initialize SQLite database
+const db = new Database('./titan.db');
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+
+// Database schema
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    name TEXT,
+    role TEXT DEFAULT 'user',
+    plan TEXT DEFAULT 'free',
+    credits INTEGER DEFAULT 100,
+    creditsUsed INTEGER DEFAULT 0,
+    abn TEXT,
+    stripeCustomerId TEXT,
+    createdAt TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    createdAt TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (userId) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    title TEXT,
+    description TEXT,
+    type TEXT,
+    status TEXT DEFAULT 'intake',
+    price REAL DEFAULT 0,
+    deployedUrl TEXT,
+    createdAt TEXT DEFAULT (datetime('now')),
+    updatedAt TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (userId) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS credit_transactions (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    action TEXT,
+    credits INTEGER,
+    costAUD REAL,
+    createdAt TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (userId) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS products (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    type TEXT,
+    category TEXT,
+    description TEXT,
+    url TEXT,
+    status TEXT DEFAULT 'staging',
+    revenue REAL DEFAULT 0,
+    users INTEGER DEFAULT 0,
+    launchedAt TEXT,
+    createdAt TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS ideas (
+    id TEXT PRIMARY KEY,
+    title TEXT,
+    description TEXT,
+    category TEXT,
+    priority TEXT DEFAULT 'medium',
+    status TEXT DEFAULT 'idea',
+    price REAL,
+    market TEXT,
+    createdAt TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS leads (
+    id TEXT PRIMARY KEY,
+    userId TEXT,
+    name TEXT,
+    email TEXT,
+    company TEXT,
+    status TEXT DEFAULT 'new',
+    createdAt TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (userId) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS invoices (
+    id TEXT PRIMARY KEY,
+    userId TEXT,
+    amount REAL,
+    status TEXT DEFAULT 'draft',
+    createdAt TEXT DEFAULT (datetime('now')),
+    paidAt TEXT,
+    FOREIGN KEY (userId) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS deployments (
+    id TEXT PRIMARY KEY,
+    projectId TEXT,
+    userId TEXT,
+    platform TEXT,
+    url TEXT,
+    status TEXT DEFAULT 'pending',
+    createdAt TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (userId) REFERENCES users(id)
+  );
+`);
+
+// Prepared statements for performance
+const stmts = {
+  getUserByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
+  getUserById: db.prepare('SELECT * FROM users WHERE id = ?'),
+  createUser: db.prepare('INSERT INTO users (id, email, password, name, role, plan, credits, creditsUsed, abn, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  createSession: db.prepare('INSERT INTO sessions (token, userId) VALUES (?, ?)'),
+  getSession: db.prepare('SELECT u.* FROM sessions s JOIN users u ON s.userId = u.id WHERE s.token = ?'),
+  deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
+  getProjectsByUser: db.prepare('SELECT * FROM projects WHERE userId = ? ORDER BY createdAt DESC'),
+  getAllProjects: db.prepare('SELECT * FROM projects ORDER BY createdAt DESC'),
+  createProject: db.prepare('INSERT INTO projects (id, userId, title, description, type, status, price, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+  updateProject: db.prepare("UPDATE projects SET status = ?, deployedUrl = ?, updatedAt = datetime('now') WHERE id = ?"),
+  createCreditTransaction: db.prepare('INSERT INTO credit_transactions (id, userId, action, credits, costAUD) VALUES (?, ?, ?, ?, ?)'),
+  getUserCreditTransactions: db.prepare('SELECT * FROM credit_transactions WHERE userId = ? ORDER BY createdAt DESC'),
+  getAllCreditTransactions: db.prepare('SELECT * FROM credit_transactions ORDER BY createdAt DESC'),
+  updateUserCredits: db.prepare('UPDATE users SET creditsUsed = ? WHERE id = ?'),
+  getProducts: db.prepare('SELECT * FROM products ORDER BY createdAt DESC'),
+  createProduct: db.prepare('INSERT INTO products (id, name, type, category, description, url, status, revenue, users) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  updateProduct: db.prepare('UPDATE products SET status = ?, url = ?, revenue = ?, users = ? WHERE id = ?'),
+  getIdeas: db.prepare('SELECT * FROM ideas ORDER BY createdAt DESC'),
+  createIdea: db.prepare('INSERT INTO ideas (id, title, description, category, priority, status, price, market) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+  getLeads: db.prepare('SELECT * FROM leads ORDER BY createdAt DESC'),
+  createLead: db.prepare('INSERT INTO leads (id, userId, name, email, company, status) VALUES (?, ?, ?, ?, ?, ?)'),
+  getInvoices: db.prepare('SELECT * FROM invoices ORDER BY createdAt DESC'),
+  createInvoice: db.prepare('INSERT INTO invoices (id, userId, amount, status) VALUES (?, ?, ?, ?)'),
+  getUsers: db.prepare('SELECT id, email, name, role, plan, credits, creditsUsed, createdAt FROM users'),
+  getUserCount: db.prepare('SELECT COUNT(*) as count FROM users'),
+  getProjectCount: db.prepare('SELECT COUNT(*) as count FROM projects'),
+  getPaidInvoiceTotal: db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM invoices WHERE status = ?'),
+  getActiveLeadCount: db.prepare('SELECT COUNT(*) as count FROM leads WHERE status = ?'),
+  getIdeaCount: db.prepare('SELECT COUNT(*) as count FROM ideas'),
+  getTotalCreditsUsed: db.prepare('SELECT COALESCE(SUM(creditsUsed), 0) as total FROM users'),
+};
+
+// In-memory (non-persistent, regenerated on restart)
+const autopilotJobs = [
+  { name: 'Market Intel Scan', schedule: 'Daily 6:00 AM AEST', lastRun: null, status: 'active' },
+  { name: 'Inbox Poll', schedule: 'Every 30 min', lastRun: null, status: 'active' },
+  { name: 'Morning Briefing', schedule: 'Daily 7:00 AM AEST', lastRun: null, status: 'active' },
+  { name: 'Revenue Update', schedule: 'Daily 5:00 PM AEST', lastRun: null, status: 'active' },
+  { name: 'Social Posts', schedule: 'Weekly Mon 9:00 AM AEST', lastRun: null, status: 'active' },
+  { name: 'Health Check', schedule: 'Hourly', lastRun: null, status: 'active' },
+  { name: 'Hot Leads Auto-Fire', schedule: 'Daily 10:00 AM AEST', lastRun: null, status: 'active' },
+  { name: 'Self-Heal Probe', schedule: 'Every 15 min', lastRun: null, status: 'active' }
+];
+
+const systemHealth = {
+  database: 'ok', api: 'ok', autopilot: 'ok', hotLeads: 'ok',
+  credentials: 'ok', email: 'warning', disk: 'ok', memory: 'ok'
+};
+
+// Credit costs per action
+const creditCosts = {
+  webBuilder: 5, appBuilder: 10, design: 10, copywriter: 3,
+  data: 5, code: 5, sales: 3, ops: 3, avatar: 10, chat: 1, setup: 0
+};
+
+// Seed data
+const userCount = stmts.getUserCount.get();
+if (userCount.count === 0) {
+  stmts.createUser.run('1', 'admin@titan.ai', 'titan2024', 'Admin', 'admin', 'enterprise', 2000, 0, '', new Date().toISOString());
+  stmts.createUser.run('2', 'demo@titan.ai', 'demo2024', 'Demo User', 'user', 'pro', 500, 150, '', new Date().toISOString());
+}
+
+const ideaCount = stmts.getIdeaCount.get();
+if (ideaCount.count === 0) {
+  stmts.createIdea.run('1', 'AI Logo Generator', 'Auto-generate brand logos for small business', 'tool', 'high', 'hot', 29, 'Small business AU');
+  stmts.createIdea.run('2', 'Tradie Quote Calculator', 'Instant quoting tool for tradies', 'app', 'high', 'in-progress', 49, 'Australian tradies');
+  stmts.createIdea.run('3', 'Farm Management Dashboard', 'Already live as Broiler Base Mate', 'app', 'medium', 'selling', 99, 'Australian farmers');
+  stmts.createIdea.run('4', 'Restaurant Booking System', 'Table bookings + menu management', 'app', 'medium', 'idea', 79, 'AU hospitality');
+  stmts.createIdea.run('5', 'Real Estate Listing Builder', 'AI-generated property listings + photos', 'tool', 'low', 'idea', 59, 'AU real estate agents');
+}
+
+const productCount = db.prepare('SELECT COUNT(*) as count FROM products').get();
+if (productCount.count === 0) {
+  stmts.createProduct.run('1', 'Broiler Base Mate', 'app', 'agriculture', 'Poultry farm management platform', 'https://broilerbasemate.com.au', 'live', 1500, 12);
+  stmts.createProduct.run('2', 'Titan AI Platform', 'app', 'ai-business', 'Australian-first AI business platform', 'https://titan.appcovi.com', 'staging', 0, 0);
+  stmts.createProduct.run('3', 'AppCovi Corporate Site', 'website', 'corporate', 'Main company website', 'https://appcovi.com', 'staging', 0, 0);
+  stmts.createProduct.run('4', 'FORGE Business Engine', 'program', 'automation', 'Internal business automation platform', null, 'internal', 0, 1);
+}
 
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// In-memory data store
-const db = {
-  users: [
-    { id: '1', email: 'admin@titan.ai', password: 'titan2024', name: 'Admin', role: 'admin', plan: 'enterprise', credits: 2000, creditsUsed: 0, abn: '', createdAt: new Date().toISOString() },
-    { id: '2', email: 'demo@titan.ai', password: 'demo2024', name: 'Demo User', role: 'user', plan: 'pro', credits: 500, creditsUsed: 150, abn: '', createdAt: new Date().toISOString() }
-  ],
-  creditTransactions: [],
-  projects: [],
-  leads: [],
-  invoices: [],
-  ideas: [
-    { id: '1', title: 'AI Logo Generator', description: 'Auto-generate brand logos for small business', category: 'tool', priority: 'high', status: 'hot', price: 29, market: 'Small business AU' },
-    { id: '2', title: 'Tradie Quote Calculator', description: 'Instant quoting tool for tradies', category: 'app', priority: 'high', status: 'in-progress', price: 49, market: 'Australian tradies' },
-    { id: '3', title: 'Farm Management Dashboard', description: 'Already live as Broiler Base Mate', category: 'app', priority: 'medium', status: 'selling', price: 99, market: 'Australian farmers' },
-    { id: '4', title: 'Restaurant Booking System', description: 'Table bookings + menu management', category: 'app', priority: 'medium', status: 'idea', price: 79, market: 'AU hospitality' },
-    { id: '5', title: 'Real Estate Listing Builder', description: 'AI-generated property listings + photos', category: 'tool', priority: 'low', status: 'idea', price: 59, market: 'AU real estate agents' }
-  ],
-  products: [
-    { id: '1', name: 'Broiler Base Mate', type: 'app', category: 'agriculture', description: 'Poultry farm management platform with silo tracking, feed alerts, batch results, and AI feed advisor.', url: 'https://broilerbasemate.com.au', status: 'live', revenue: 1500, users: 12, launchedAt: '2024-06-01T00:00:00.000Z', createdAt: '2024-01-15T00:00:00.000Z' },
-    { id: '2', name: 'Titan AI Platform', type: 'app', category: 'ai-business', description: 'Australian-first AI business platform. Websites, apps, logos, copy, data, sales, operations.', url: 'https://titan.appcovi.com', status: 'staging', revenue: 0, users: 0, createdAt: '2025-01-01T00:00:00.000Z' },
-    { id: '3', name: 'AppCovi Corporate Site', type: 'website', category: 'corporate', description: 'Main company website showcasing AppCovi products and services.', url: 'https://appcovi.com', status: 'staging', revenue: 0, users: 0, createdAt: '2025-01-01T00:00:00.000Z' },
-    { id: '4', name: 'FORGE Business Engine', type: 'program', category: 'automation', description: 'Internal business automation platform — autopilot, hot leads, credential vault, self-heal.', url: null, status: 'internal', revenue: 0, users: 1, createdAt: '2024-03-01T00:00:00.000Z' }
-  ],
-  sessions: {},
-  autopilotJobs: [
-    { name: 'Market Intel Scan', schedule: 'Daily 6:00 AM AEST', lastRun: null, status: 'active' },
-    { name: 'Inbox Poll', schedule: 'Every 30 min', lastRun: null, status: 'active' },
-    { name: 'Morning Briefing', schedule: 'Daily 7:00 AM AEST', lastRun: null, status: 'active' },
-    { name: 'Revenue Update', schedule: 'Daily 5:00 PM AEST', lastRun: null, status: 'active' },
-    { name: 'Social Posts', schedule: 'Weekly Mon 9:00 AM AEST', lastRun: null, status: 'active' },
-    { name: 'Health Check', schedule: 'Hourly', lastRun: null, status: 'active' },
-    { name: 'Hot Leads Auto-Fire', schedule: 'Daily 10:00 AM AEST', lastRun: null, status: 'active' },
-    { name: 'Self-Heal Probe', schedule: 'Every 15 min', lastRun: null, status: 'active' }
-  ],
-  systemHealth: {
-    database: 'ok', api: 'ok', autopilot: 'ok', hotLeads: 'ok',
-    credentials: 'ok', email: 'warning', disk: 'ok', memory: 'ok'
-  }
-};
-
 // Auth middleware
 function auth(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token || !db.sessions[token]) {
-    return res.status(401).json({ error: 'Not authenticated' });
-  }
-  req.user = db.sessions[token];
+  if (!token) return res.status(401).json({ error: 'Not authenticated' });
+  const user = stmts.getSession.get(token);
+  if (!user) return res.status(401).json({ error: 'Session expired or invalid' });
+  req.user = user;
   next();
 }
 
 // ============ AUTH ROUTES ============
 app.post('/api/auth/login', (req, res) => {
   const { email, password } = req.body;
-  const user = db.users.find(u => u.email === email && u.password === password);
-  if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+  const user = stmts.getUserByEmail.get(email);
+  if (!user || user.password !== password) return res.status(401).json({ error: 'Invalid credentials' });
   const token = crypto.randomBytes(32).toString('hex');
-  db.sessions[token] = user;
+  stmts.createSession.run(token, user.id);
   res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role, plan: user.plan } });
 });
 
 app.post('/api/auth/register', (req, res) => {
   const { email, password, name, abn } = req.body;
-  if (db.users.find(u => u.email === email)) return res.status(400).json({ error: 'Email already registered' });
-  const user = { id: crypto.randomBytes(8).toString('hex'), email, password, name, role: 'user', plan: 'free', abn: abn || '', createdAt: new Date().toISOString() };
-  db.users.push(user);
+  const existing = stmts.getUserByEmail.get(email);
+  if (existing) return res.status(400).json({ error: 'Email already registered' });
+  const id = crypto.randomBytes(8).toString('hex');
+  stmts.createUser.run(id, email, password, name, 'user', 'free', 100, 0, abn || '', new Date().toISOString());
   const token = crypto.randomBytes(32).toString('hex');
-  db.sessions[token] = user;
-  res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role, plan: user.plan } });
+  stmts.createSession.run(token, id);
+  res.json({ token, user: { id, email, name, role: 'user', plan: 'free' } });
+});
+
+app.post('/api/auth/logout', auth, (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  stmts.deleteSession.run(token);
+  res.json({ success: true });
 });
 
 // ============ PROJECT ROUTES ============
 app.get('/api/projects', auth, (req, res) => {
-  const projects = db.projects.filter(p => p.userId === req.user.id || req.user.role === 'admin');
+  const projects = req.user.role === 'admin' ? stmts.getAllProjects.all() : stmts.getProjectsByUser.all(req.user.id);
   res.json(projects);
 });
 
 app.post('/api/projects', auth, (req, res) => {
-  const project = {
-    id: crypto.randomBytes(8).toString('hex'),
-    userId: req.user.id,
-    ...req.body,
-    status: 'intake',
-    createdAt: new Date().toISOString()
-  };
-  db.projects.push(project);
+  const id = crypto.randomBytes(8).toString('hex');
+  const { title, description, type, price } = req.body;
+  stmts.createProject.run(id, req.user.id, title, description, type, 'intake', price || 0, new Date().toISOString());
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
   res.json(project);
 });
 
 app.patch('/api/projects/:id', auth, (req, res) => {
-  const project = db.projects.find(p => p.id === req.params.id);
-  if (!project) return res.status(404).json({ error: 'Not found' });
-  Object.assign(project, req.body);
+  const { status, deployedUrl } = req.body;
+  stmts.updateProject.run(status, deployedUrl, req.params.id);
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
   res.json(project);
 });
 
 // ============ LEADS ROUTES ============
-app.get('/api/leads', auth, (req, res) => {
-  res.json(db.leads);
-});
+app.get('/api/leads', auth, (req, res) => { res.json(stmts.getLeads.all()); });
 
 app.post('/api/leads', auth, (req, res) => {
-  const lead = { id: crypto.randomBytes(8).toString('hex'), ...req.body, createdAt: new Date().toISOString() };
-  db.leads.push(lead);
-  res.json(lead);
+  const id = crypto.randomBytes(8).toString('hex');
+  const { name, email, company } = req.body;
+  stmts.createLead.run(id, req.user.id, name, email, company, 'new');
+  res.json({ id, userId: req.user.id, name, email, company, status: 'new', createdAt: new Date().toISOString() });
 });
 
 // ============ INVOICES ROUTES ============
-app.get('/api/invoices', auth, (req, res) => {
-  res.json(db.invoices);
-});
+app.get('/api/invoices', auth, (req, res) => { res.json(stmts.getInvoices.all()); });
 
 app.post('/api/invoices', auth, (req, res) => {
-  const invoice = { id: crypto.randomBytes(8).toString('hex'), ...req.body, status: 'draft', createdAt: new Date().toISOString() };
-  db.invoices.push(invoice);
-  res.json(invoice);
+  const id = crypto.randomBytes(8).toString('hex');
+  const { amount } = req.body;
+  stmts.createInvoice.run(id, req.user.id, amount, 'draft');
+  res.json({ id, userId: req.user.id, amount, status: 'draft', createdAt: new Date().toISOString() });
 });
 
 // ============ IDEAS ROUTES ============
-app.get('/api/ideas', auth, (req, res) => {
-  res.json(db.ideas);
-});
+app.get('/api/ideas', auth, (req, res) => { res.json(stmts.getIdeas.all()); });
 
 app.post('/api/ideas', auth, (req, res) => {
-  const idea = { id: crypto.randomBytes(8).toString('hex'), ...req.body, status: 'idea' };
-  db.ideas.push(idea);
-  res.json(idea);
+  const id = crypto.randomBytes(8).toString('hex');
+  const { title, description, category, priority, price, market } = req.body;
+  stmts.createIdea.run(id, title, description, category, priority || 'medium', 'idea', price || 0, market || '');
+  res.json({ id, title, description, category, priority: priority || 'medium', status: 'idea', price, market });
 });
 
 // ============ PRODUCTS ROUTES ============
-app.get('/api/products', auth, (req, res) => {
-  res.json(db.products);
-});
+app.get('/api/products', auth, (req, res) => { res.json(stmts.getProducts.all()); });
 
 app.post('/api/products', auth, (req, res) => {
-  const product = { 
-    id: crypto.randomBytes(8).toString('hex'), 
-    ...req.body, 
-    status: req.body.status || 'staging',
-    revenue: 0,
-    users: 0,
-    createdAt: new Date().toISOString()
-  };
-  db.products.push(product);
-  res.json(product);
+  const id = crypto.randomBytes(8).toString('hex');
+  const { name, type, category, description, url } = req.body;
+  stmts.createProduct.run(id, name, type, category, description, url, 'staging', 0, 0);
+  res.json({ id, name, type, category, description, url, status: 'staging', revenue: 0, users: 0 });
 });
 
 app.patch('/api/products/:id', auth, (req, res) => {
-  const product = db.products.find(p => p.id === req.params.id);
+  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
   if (!product) return res.status(404).json({ error: 'Not found' });
-  Object.assign(product, req.body);
-  res.json(product);
+  const { status, url, revenue, users } = req.body;
+  stmts.updateProduct.run(status || product.status, url || product.url, revenue ?? product.revenue, users ?? product.users, req.params.id);
+  res.json(db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id));
+});
+
+// ============ DEPLOYMENT ROUTES ============
+const deploymentManager = require('./lib/deployment');
+
+app.get('/api/deploy/platforms', auth, (req, res) => {
+  res.json(deploymentManager.getSupportedPlatforms());
+});
+
+app.post('/api/deploy/:projectId', auth, async (req, res) => {
+  try {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const platform = req.body.platform || 'local';
+    const deployment = await deploymentManager.deploy(project, platform);
+    
+    // Store deployment record
+    db.prepare('INSERT INTO deployments (id, projectId, userId, platform, url, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      deployment.deploymentId, project.id, req.user.id, platform, deployment.url, deployment.status, new Date().toISOString()
+    );
+    
+    // Update project with deployed URL
+    db.prepare('UPDATE projects SET deployedUrl = ?, status = ?, updatedAt = datetime("now") WHERE id = ?').run(
+      deployment.url, 'deployed', project.id
+    );
+    
+    res.json(deployment);
+  } catch (err) {
+    console.error('Deployment error:', err);
+    res.status(500).json({ error: 'Deployment failed' });
+  }
+});
+
+app.get('/api/deployments/:projectId', auth, (req, res) => {
+  const deployments = db.prepare('SELECT * FROM deployments WHERE projectId = ? ORDER BY createdAt DESC').all(req.params.projectId);
+  res.json(deployments);
+});
+
+// ============ ANALYTICS ROUTES ============
+app.get('/api/analytics/overview', auth, (req, res) => {
+  const totalUsers = stmts.getUserCount.get().count;
+  const totalProjects = stmts.getProjectCount.get().count;
+  const totalTransactions = db.prepare('SELECT COUNT(*) as count FROM credit_transactions').get().count;
+  const totalRevenue = stmts.getPaidInvoiceTotal.get('paid').total;
+  const activeSessions = db.prepare('SELECT COUNT(*) as count FROM sessions').get().count;
+  
+  res.json({
+    totalUsers,
+    totalProjects,
+    totalTransactions,
+    totalRevenue,
+    activeSessions,
+    systemHealth
+  });
+});
+
+app.get('/api/analytics/usage', auth, (req, res) => {
+  const usage = db.prepare(`
+    SELECT action, COUNT(*) as count, SUM(credits) as totalCredits
+    FROM credit_transactions
+    GROUP BY action
+    ORDER BY count DESC
+  `).all();
+  res.json(usage);
 });
 
 // ============ ADMIN ROUTES ============
 app.get('/api/admin/stats', auth, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
   res.json({
-    totalUsers: db.users.length,
-    totalProjects: db.projects.length,
-    totalRevenue: db.invoices.filter(i => i.status === 'paid').reduce((sum, i) => sum + (i.amount || 0), 0),
-    activeLeads: db.leads.filter(l => l.status === 'active').length,
-    ideasCount: db.ideas.length,
-    autopilotJobs: db.autopilotJobs.length,
-    systemHealth: db.systemHealth
+    totalUsers: stmts.getUserCount.get().count,
+    totalProjects: stmts.getProjectCount.get().count,
+    totalRevenue: stmts.getPaidInvoiceTotal.get('paid').total,
+    activeLeads: stmts.getActiveLeadCount.get('active').count,
+    ideasCount: stmts.getIdeaCount.get().count,
+    autopilotJobs: autopilotJobs.length,
+    systemHealth
   });
 });
 
-app.get('/api/admin/autopilot', auth, (req, res) => {
-  res.json(db.autopilotJobs);
+app.get('/api/admin/autopilot', auth, (req, res) => { res.json(autopilotJobs); });
+app.get('/api/admin/health', auth, (req, res) => { res.json(systemHealth); });
+
+app.get('/api/admin/revenue', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  const users = stmts.getUsers.all();
+  const paidUsers = users.filter(u => u.plan !== 'free');
+  const totalCreditsUsed = stmts.getTotalCreditsUsed.get().total;
+  const totalRevenue = totalCreditsUsed * 0.39;
+  const totalCost = totalCreditsUsed * 0.02;
+
+  // Breakdown by tier
+  const tiers = { starter: 0, pro: 0, enterprise: 0 };
+  paidUsers.forEach(u => { if (tiers[u.plan] !== undefined) tiers[u.plan]++; });
+
+  res.json({
+    customers: { starter: tiers.starter, pro: tiers.pro, enterprise: tiers.enterprise },
+    revenue: { AUD: totalRevenue, USD: totalRevenue * 0.65 },
+    costs: { AUD: totalCost, USD: totalCost * 0.65 },
+    profit: { AUD: totalRevenue - totalCost, USD: (totalRevenue - totalCost) * 0.65, margin: totalRevenue > 0 ? ((totalRevenue - totalCost) / totalRevenue * 100).toFixed(1) + '%' : '0%' },
+    arr: { AUD: totalRevenue * 12, USD: totalRevenue * 12 * 0.65 },
+    actuals: { totalCreditsUsed, totalRevenueAUD: totalRevenue, totalCostAUD: totalCost, profitAUD: totalRevenue - totalCost }
+  });
 });
 
-app.get('/api/admin/health', auth, (req, res) => {
-  res.json(db.systemHealth);
+app.get('/api/admin/users', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  res.json(stmts.getUsers.all());
 });
 
 // ============ PAYMENT ROUTES ============
+app.get('/api/payments/plans', (req, res) => {
+  res.json({
+    free: { price: 0, name: 'Free', credits: 100 },
+    starter: { price: 29, name: 'Starter', credits: 100 },
+    pro: { price: 79, name: 'Pro', credits: 500 },
+    enterprise: { price: 199, name: 'Enterprise', credits: 2000 }
+  });
+});
+
 app.post('/api/payments/checkout', auth, async (req, res) => {
   try {
+    const stripeLib = require('./lib/stripe');
     const { planId } = req.body;
     if (!planId) return res.status(400).json({ error: 'Plan ID required' });
-    
     const session = await stripeLib.createCheckoutSession(req.user, planId);
     if (!session) return res.status(400).json({ error: 'Invalid plan or free tier' });
-    
     res.json({ sessionId: session.id, url: session.url });
   } catch (err) {
-    console.error('Checkout error:', err);
-    res.status(500).json({ error: 'Payment setup failed' });
+    console.error('Checkout error:', err.message);
+    res.status(500).json({ error: 'Payment setup failed: ' + err.message });
   }
 });
 
-app.post('/api/payments/portal', auth, async (req, res) => {
-  try {
-    if (!req.user.stripeCustomerId) {
-      return res.status(400).json({ error: 'No subscription found' });
-    }
-    
-    const session = await stripeLib.createPortalSession(req.user.stripeCustomerId);
-    res.json({ url: session.url });
-  } catch (err) {
-    console.error('Portal error:', err);
-    res.status(500).json({ error: 'Portal setup failed' });
-  }
-});
-
-// Stripe webhook - needs raw body
 app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  await stripeLib.handleWebhook(req, res);
-});
-
-app.get('/api/payments/plans', (req, res) => {
-  res.json(stripeLib.PLANS);
+  try {
+    const stripeLib = require('./lib/stripe');
+    await stripeLib.handleWebhook(req, res);
+  } catch (err) {
+    res.status(500).json({ error: 'Webhook error' });
+  }
 });
 
 // ============ CREDIT ROUTES ============
 app.get('/api/credits/balance', auth, (req, res) => {
-  const user = db.users.find(u => u.id === req.user.id);
+  const user = stmts.getUserById.get(req.user.id);
   res.json({
     plan: user.plan,
     credits: user.credits || 0,
@@ -240,127 +465,81 @@ app.get('/api/credits/balance', auth, (req, res) => {
 });
 
 app.get('/api/credits/transactions', auth, (req, res) => {
-  const transactions = db.creditTransactions
-    .filter(t => t.userId === req.user.id || req.user.role === 'admin')
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const transactions = req.user.role === 'admin'
+    ? stmts.getAllCreditTransactions.all()
+    : stmts.getUserCreditTransactions.all(req.user.id);
   res.json(transactions);
 });
 
 app.get('/api/credits/pricing', (req, res) => {
-  res.json(creditSystem.pricing);
-});
-
-app.post('/api/credits/use', auth, async (req, res) => {
-  const { action, credits } = req.body;
-  const user = db.users.find(u => u.id === req.user.id);
-  
-  if (!user.credits) user.credits = 0;
-  if (!user.creditsUsed) user.creditsUsed = 0;
-  
-  const remaining = user.credits - user.creditsUsed;
-  if (remaining < credits) {
-    return res.status(402).json({ 
-      error: 'Insufficient credits',
-      required: credits,
-      remaining,
-      upgrade: '/api/payments/checkout'
-    });
-  }
-  
-  user.creditsUsed += credits;
-  
-  const transaction = {
-    id: crypto.randomBytes(8).toString('hex'),
-    userId: user.id,
-    action,
-    credits,
-    costAUD: credits * 0.02,
-    createdAt: new Date().toISOString()
-  };
-  db.creditTransactions.push(transaction);
-  
   res.json({
-    success: true,
-    creditsUsed: user.creditsUsed,
-    creditsRemaining: user.credits - user.creditsUsed,
-    transaction
-  });
-});
-
-app.get('/api/credits/cost/:action', auth, (req, res) => {
-  const cost = creditSystem.calculateCost(req.params.action);
-  res.json(cost);
-});
-
-app.get('/api/admin/revenue', auth, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  
-  const projections = creditSystem.projectMonthly(db.users.filter(u => u.plan !== 'free').length);
-  const totalCreditsUsed = db.users.reduce((sum, u) => sum + (u.creditsUsed || 0), 0);
-  const totalRevenue = totalCreditsUsed * 0.39; // $0.39 per credit revenue
-  
-  res.json({
-    ...projections,
-    actuals: {
-      totalCreditsUsed,
-      totalRevenueAUD: totalRevenue,
-      totalCostAUD: totalCreditsUsed * 0.02,
-      profitAUD: totalRevenue - (totalCreditsUsed * 0.02)
-    }
+    'ai-chat': { credits: 1, costAUD: 0.02, priceAUD: 0.39 },
+    'ai-code': { credits: 5, costAUD: 0.10, priceAUD: 1.95 },
+    'ai-design': { credits: 10, costAUD: 0.20, priceAUD: 3.90 },
+    'ai-copy': { credits: 3, costAUD: 0.06, priceAUD: 1.17 },
+    'ai-avatar': { credits: 10, costAUD: 0.20, priceAUD: 3.90 },
+    'website-build': { credits: 50, costAUD: 1.00, priceAUD: 19.50 },
+    'app-build': { credits: 100, costAUD: 2.00, priceAUD: 39.00 },
+    'deployment': { credits: 20, costAUD: 0.40, priceAUD: 7.80 }
   });
 });
 
 // ============ SETUP COMMANDS ============
-app.post('/api/setup/stripe', auth, async (req, res) => {
+app.post('/api/setup/:service', auth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-  
+
+  const service = req.params.service;
+  const config = req.body;
+
   try {
-    const { secretKey, webhookSecret } = req.body;
-    
-    if (!secretKey) {
-      return res.status(400).json({ error: 'Stripe secret key required' });
+    const envPath = path.join(__dirname, '.env');
+    let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+
+    const envMap = {
+      stripe: { STRIPE_SECRET_KEY: config.secretKey, STRIPE_WEBHOOK_SECRET: config.webhookSecret },
+      openai: { OPENAI_API_KEY: config.apiKey },
+      anthropic: { ANTHROPIC_API_KEY: config.apiKey },
+      email: { GMAIL_USER: config.email, GMAIL_APP_PASSWORD: config.password },
+      twilio: { TWILIO_ACCOUNT_SID: config.sid, TWILIO_AUTH_TOKEN: config.token, TWILIO_PHONE_NUMBER: config.phone }
+    };
+
+    if (!envMap[service]) return res.status(400).json({ error: 'Unknown service' });
+
+    for (const [key, value] of Object.entries(envMap[service])) {
+      if (value) {
+        const regex = new RegExp(`^${key}=.*$`, 'm');
+        if (regex.test(envContent)) {
+          envContent = envContent.replace(regex, `${key}=${value}`);
+        } else {
+          envContent += `\n${key}=${value}`;
+        }
+      }
     }
-    
-    // Write .env file
-    const envContent = `STRIPE_SECRET_KEY=${secretKey}
-STRIPE_WEBHOOK_SECRET=${webhookSecret || ''}
-SITE_URL=http://localhost:3000
-`;
-    
-    fs.writeFileSync(path.join(__dirname, '.env'), envContent);
-    
-    console.log('✅ Stripe configured via setup command');
-    res.json({ 
-      success: true, 
-      message: 'Stripe configured. Restart the server to activate.',
-      instructions: 'Run `npm start` to restart with new configuration'
-    });
+
+    if (!envContent.includes('SITE_URL=')) envContent += '\nSITE_URL=http://localhost:3000';
+    fs.writeFileSync(envPath, envContent.trim() + '\n');
+
+    res.json({ success: true, message: `${service} configured. Restart server to activate.` });
   } catch (err) {
-    console.error('Setup error:', err);
-    res.status(500).json({ error: 'Setup failed' });
+    res.status(500).json({ error: 'Setup failed: ' + err.message });
   }
 });
 
 app.get('/api/setup/status', auth, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-  
   const envPath = path.join(__dirname, '.env');
   const hasEnv = fs.existsSync(envPath);
-  
-  let config = {
-    stripe: false,
-    webhook: false,
-    siteUrl: false
-  };
-  
-  if (hasEnv) {
-    const envContent = fs.readFileSync(envPath, 'utf8');
-    config.stripe = envContent.includes('STRIPE_SECRET_KEY=') && !envContent.includes('STRIPE_SECRET_KEY=\n');
-    config.webhook = envContent.includes('STRIPE_WEBHOOK_SECRET=') && !envContent.includes('STRIPE_WEBHOOK_SECRET=\n');
-    config.siteUrl = envContent.includes('SITE_URL=');
-  }
-  
-  res.json({ configured: hasEnv, ...config });
+  const envContent = hasEnv ? fs.readFileSync(envPath, 'utf8') : '';
+
+  res.json({
+    configured: hasEnv,
+    stripe: envContent.includes('STRIPE_SECRET_KEY=') && !envContent.match(/STRIPE_SECRET_KEY=\s*$/m),
+    openai: envContent.includes('OPENAI_API_KEY=') && !envContent.match(/OPENAI_API_KEY=\s*$/m),
+    anthropic: envContent.includes('ANTHROPIC_API_KEY=') && !envContent.match(/ANTHROPIC_API_KEY=\s*$/m),
+    email: envContent.includes('GMAIL_USER='),
+    twilio: envContent.includes('TWILIO_ACCOUNT_SID='),
+    siteUrl: envContent.includes('SITE_URL=')
+  });
 });
 
 // ============ AGENT ROUTES ============
@@ -369,49 +548,26 @@ app.post('/api/agent/route', auth, async (req, res) => {
     const { message, mode } = req.body;
     const agentRouter = require('./agents/router');
     const result = await agentRouter.process(message, mode, req.user);
-    
-    // Calculate credits based on agent type
-    const creditCosts = {
-      webBuilder: 5,
-      appBuilder: 10,
-      design: 10,
-      copywriter: 3,
-      data: 5,
-      code: 5,
-      sales: 3,
-      ops: 3,
-      avatar: 10,
-      chat: 1,
-      setup: 0
-    };
-    
-    const creditCost = creditCosts[result.agentKey] || 1;
-    
-    // Deduct credits if brain is ready (real AI)
-    const brain = require('./lib/brain');
-    if (brain.isReady() && result.agentKey !== 'setup') {
-      const user = db.users.find(u => u.id === req.user.id);
-      if (!user.credits) user.credits = 0;
-      if (!user.creditsUsed) user.creditsUsed = 0;
-      
-      const remaining = user.credits - user.creditsUsed;
-      if (remaining >= creditCost) {
-        user.creditsUsed += creditCost;
-        db.creditTransactions.push({
-          id: crypto.randomBytes(8).toString('hex'),
-          userId: user.id,
-          action: `ai-${result.agentKey}`,
-          credits: creditCost,
-          costAUD: creditCost * 0.02,
-          createdAt: new Date().toISOString()
-        });
-        result.creditsUsed = creditCost;
-        result.creditsRemaining = user.credits - user.creditsUsed;
+
+    const cost = creditCosts[result.agentKey] || 1;
+
+    // Deduct credits
+    if (result.agentKey !== 'setup' && cost > 0) {
+      const user = stmts.getUserById.get(req.user.id);
+      const remaining = (user.credits || 0) - (user.creditsUsed || 0);
+      if (remaining >= cost) {
+        const newUsed = (user.creditsUsed || 0) + cost;
+        stmts.updateUserCredits.run(newUsed, user.id);
+        stmts.createCreditTransaction.run(
+          crypto.randomBytes(8).toString('hex'), user.id, `ai-${result.agentKey}`, cost, cost * 0.02
+        );
+        result.creditsUsed = cost;
+        result.creditsRemaining = (user.credits || 0) - newUsed;
       } else {
         result.creditsWarning = 'Insufficient credits. Upgrade your plan.';
       }
     }
-    
+
     res.json(result);
   } catch (error) {
     console.error('Agent route error:', error);
@@ -429,15 +585,18 @@ app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'views', 'admi
 app.get('/pipeline', (req, res) => res.sendFile(path.join(__dirname, 'views', 'pipeline.html')));
 app.get('/avatar', (req, res) => res.sendFile(path.join(__dirname, 'views', 'avatar.html')));
 
-// Fire autopilot on startup
+// ============ START ============
 console.log('🔥 Titan AI — Australian-First AI Business Platform');
+console.log('   Database: SQLite (persistent)');
 console.log('   Autopilot: 8 jobs armed');
 console.log('   Self-Heal: 8 surfaces probed');
-console.log('   Agents: Router + 8 specialists ready');
+console.log('   Agents: Router + 9 specialists ready');
+console.log('   Payments: Stripe ready');
+console.log('   Credits: Active');
 console.log(`   Server: http://localhost:${PORT}`);
 
+autopilotJobs.forEach(job => { job.lastRun = new Date().toISOString(); });
+
 app.listen(PORT, '0.0.0.0', () => {
-  // Fire initial autopilot jobs
-  db.autopilotJobs.forEach(job => { job.lastRun = new Date().toISOString(); });
-  console.log('✅ Autopilot fired initial jobs');
+  console.log('✅ Titan is online and ready to make money');
 });
