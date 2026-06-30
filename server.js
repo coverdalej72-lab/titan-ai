@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
 const stripeLib = require('./lib/stripe');
 
 const app = express();
@@ -222,6 +223,59 @@ app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), asy
 
 app.get('/api/payments/plans', (req, res) => {
   res.json(stripeLib.PLANS);
+});
+
+// ============ SETUP COMMANDS ============
+app.post('/api/setup/stripe', auth, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  
+  try {
+    const { secretKey, webhookSecret } = req.body;
+    
+    if (!secretKey) {
+      return res.status(400).json({ error: 'Stripe secret key required' });
+    }
+    
+    // Write .env file
+    const envContent = `STRIPE_SECRET_KEY=${secretKey}
+STRIPE_WEBHOOK_SECRET=${webhookSecret || ''}
+SITE_URL=http://localhost:3000
+`;
+    
+    fs.writeFileSync(path.join(__dirname, '.env'), envContent);
+    
+    console.log('✅ Stripe configured via setup command');
+    res.json({ 
+      success: true, 
+      message: 'Stripe configured. Restart the server to activate.',
+      instructions: 'Run `npm start` to restart with new configuration'
+    });
+  } catch (err) {
+    console.error('Setup error:', err);
+    res.status(500).json({ error: 'Setup failed' });
+  }
+});
+
+app.get('/api/setup/status', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  
+  const envPath = path.join(__dirname, '.env');
+  const hasEnv = fs.existsSync(envPath);
+  
+  let config = {
+    stripe: false,
+    webhook: false,
+    siteUrl: false
+  };
+  
+  if (hasEnv) {
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    config.stripe = envContent.includes('STRIPE_SECRET_KEY=') && !envContent.includes('STRIPE_SECRET_KEY=\n');
+    config.webhook = envContent.includes('STRIPE_WEBHOOK_SECRET=') && !envContent.includes('STRIPE_WEBHOOK_SECRET=\n');
+    config.siteUrl = envContent.includes('SITE_URL=');
+  }
+  
+  res.json({ configured: hasEnv, ...config });
 });
 
 // ============ AGENT ROUTES ============

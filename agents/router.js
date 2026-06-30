@@ -1,5 +1,14 @@
 // Titan Core Router — classifies user intent and routes to specialist agents
+const fs = require('fs');
+const path = require('path');
+
 const skills = {
+  setup: {
+    name: 'Setup Agent',
+    triggers: ['set up', 'setup', 'configure', 'connect stripe', 'stripe setup', 'add stripe', 'enable payments'],
+    description: 'Handles system setup and integrations',
+    capabilities: ['Stripe setup', 'Environment configuration', 'API connections']
+  },
   webBuilder: {
     name: 'Web Builder',
     triggers: ['website', 'landing page', 'web app', 'site', 'homepage', 'web design', 'responsive'],
@@ -113,6 +122,13 @@ function process(message, mode, user) {
 }
 
 function generateResponse(agentKey, message, user) {
+  const lower = message.toLowerCase();
+  
+  // Check for setup commands
+  if (agentKey === 'setup') {
+    return handleSetup(message);
+  }
+  
   const responses = {
     webBuilder: {
       text: `I'll build that for you. Let me break down what I'm seeing:\n\n**Project Type:** Website/Web App\n**Estimated Complexity:** ${message.length > 100 ? 'High' : 'Medium'}\n\nHere's my approach:\n1. Design a responsive layout optimised for Australian audiences\n2. Build with clean, semantic HTML/CSS and modern JavaScript\n3. Ensure mobile-first design (most Aussie users are on mobile)\n4. Add SEO metadata for .com.au search visibility\n5. Deploy-ready output\n\nShall I start building?`,
@@ -149,6 +165,43 @@ function generateResponse(agentKey, message, user) {
   };
   
   return responses[agentKey] || responses.webBuilder;
+}
+
+// Setup agent - handles configuration through conversation
+function handleSetup(message) {
+  const lower = message.toLowerCase();
+  
+  // Check if user is providing a Stripe key
+  if (lower.includes('sk_live_') || lower.includes('sk_test_')) {
+    const keyMatch = lower.match(/sk_(live|test)_[a-z0-9]+/i);
+    if (keyMatch) {
+      // Write .env file
+      const envContent = `STRIPE_SECRET_KEY=${keyMatch[0]}
+STRIPE_WEBHOOK_SECRET=
+SITE_URL=http://localhost:3000
+`;
+      fs.writeFileSync(path.join(__dirname, '..', '.env'), envContent);
+      
+      return {
+        text: `✅ Stripe configured!\n\nI've written your .env file with:\n- Secret Key: ${keyMatch[0].substring(0, 20)}...\n\n**Next steps:**\n1. Restart the server: \`npm start\`\n2. Test with card: 4242 4242 4242 4242 (test mode) or your live card\n\nIf you have a webhook secret, say "set up stripe webhook" and paste it.`,
+        actions: ['Restart server', 'Test payment', 'Add webhook']
+      };
+    }
+  }
+  
+  // Check if user wants to set up Stripe
+  if (lower.includes('stripe')) {
+    return {
+      text: `I'll configure Stripe for you.\n\n**What I need:**\n1. Your Stripe Secret Key (starts with sk_live_ or sk_test_)\n2. Your Webhook Secret (starts with whsec_) - optional for now\n\nPaste your Stripe Secret Key now and I'll write the .env file automatically.`,
+      actions: ['Paste key', 'Skip for now']
+    };
+  }
+  
+  // General setup
+  return {
+    text: `What do you need to set up?\n\n**Available integrations:**\n- **Stripe** — Payment processing (subscriptions, invoices)\n- **OpenAI** — AI text generation\n- **Anthropic** — Claude AI\n- **Gmail** — Email sending\n- **Twilio** — SMS messaging\n\nSay "set up [service]" and I'll configure it for you.`,
+    actions: ['Stripe', 'OpenAI', 'Gmail', 'Twilio']
+  };
 }
 
 module.exports = { process, classify, skills };
